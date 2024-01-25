@@ -1,0 +1,8 @@
+sa.json
+.env
+.venv
+.idea
+data/
+
+.DS_Store
+prelim_test_scripts/

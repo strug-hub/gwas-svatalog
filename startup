@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -eo pipefail
+set -x
+
+export DATA_DIR=$(pwd)/data
+
+if [ -n "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+    echo "Authorizing with the given JSON key..."
+    gcloud auth activate-service-account --key-file=${GOOGLE_APPLICATION_CREDENTIALS}
+    echo "The client is now authorized."
+else
+    echo "Use the default service account if running in the cloud."
+fi
+
+gcloud auth list
+
+mkdir -p ${DATA_DIR}
+# chmod g+w ${DATA_DIR}
+
+gsutil cp -r "gs://sickkids-strug-lab-svatalog-data/*" $DATA_DIR
+
+# su app -c 'ls -R /app';
+
+# su app -c "python3 app.py"
+
+python3 app.py

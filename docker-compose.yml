@@ -1,0 +1,15 @@
+version: '3'
+services:
+  app:
+    image: shalvichirmade/gwas-svatalog
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dnastack.sickkids.gwas-svatalog
+    env_file: .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/etc/sa.json
+    volumes:
+      - './sa.json:/etc/sa.json:ro'
+    ports:
+      - '${DOCKER_HOST_PORT}:${PORT}'
