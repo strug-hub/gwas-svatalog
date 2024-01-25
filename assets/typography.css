@@ -1,0 +1,387 @@
+
+/* @font-face {
+    font-family: Nunito Sans;
+    src: url("NunitoSans.ttf");
+  }  */
+
+/* body{
+    color:#2F2E2D;
+    font-family: Nunito Sans;
+    /* font-weight: bolder; */
+    /* font-size: 15px; */
+/* } */ 
+
+#navbar-lf{
+  text-transform: none;
+  padding: 5px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+#navbar-lf .container{
+  margin-left: 0px !important
+}
+
+.navbar-items{
+  color:#2F2E2D;
+  text-wrap: nowrap;
+  font-size: 15px;
+}
+.navbar-items:hover{
+  color:#ffffff
+}
+
+#button-modal-contact-us{
+  text-transform: none;
+  background: #40e0d0;
+}
+
+#contact-us-mrkdwn h5{
+  text-transform: none;
+}
+
+#button-modal-citation{
+  text-transform: none;
+  background: #40e0d0;
+}
+
+#modal-citation{
+  text-transform: none;
+}
+
+#logo-image-div{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#gsv-logo-image{
+width: 250px;
+}
+
+#gsv-logo-image-div{
+  /* flex: 2; */
+  margin-left: 35%;
+  padding-left: 40px;
+  padding-right: 20px;
+  padding-top: 20px;
+  padding-bottom: 10px;
+}
+
+#disc-doc-div{
+  flex: 3;
+  padding: 20px;
+}
+
+#comp-logo-image-div{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 20px;
+  padding-left: 20px;
+  margin-right: 30px;
+}
+
+#tcag-logo-image{
+  width: 60px;
+  height: 120px;
+}
+
+#sk-logo-image{
+  width: 100px;
+}
+
+#disclaimer-div{
+  padding-top: 20px;
+}
+
+
+#disclaimer-button{
+  font-size: 14px;
+  color: turquoise;
+  border-color: turquoise;
+}
+
+#disclaimer-button:hover:enabled{
+  background: turquoise;
+  color: #f5f5f5;
+  border-color: #55d0c4;
+}
+
+#disclaimer-button:disabled{
+  background: #f5f5f5;
+}
+
+#disclaimer-button:active{
+  background:#ffffff;
+}
+
+#disclaimer-button:focus{
+  background:#ffffff;
+}
+
+#header-line-div{
+  background-color : LightSalmon;
+  padding: 3px;
+  margin-bottom: 1em;
+  margin-left: 30px;
+  margin-right: 30px;
+}
+
+.tooltip-inner{
+  background-color:lightsalmon;
+}
+
+.bs-tooltip-top .tooltip-arrow::before,
+.bs-tooltip-auto[data-popper-placement^=top] .tooltip-arrow::before {
+    border-top-color: lightsalmon;
+}
+.bs-tooltip-end .tooltip-arrow::before,
+.bs-tooltip-auto[data-popper-placement^=right] .tooltip-arrow::before {
+    border-right-color: lightsalmon;
+}
+.bs-tooltip-bottom .tooltip-arrow::before,
+.bs-tooltip-auto[data-popper-placement^=bottom] .tooltip-arrow::before {
+    border-bottom-color: lightsalmon;
+}
+.bs-tooltip-start .tooltip-arrow::before,
+.bs-tooltip-auto[data-popper-placement^=left] .tooltip-arrow::before {
+    border-left-color: lightsalmon;
+}
+
+#pheno-line-div{
+  background-color : lightsalmon;
+  padding: 0.8px;
+  margin-top: 3em;
+  margin-bottom: 2em;
+  margin-left: -1em;
+  margin-right: -1em;
+}
+
+#empty-space-region{
+ margin-bottom: 1em;
+}
+
+.class-range{
+  height: 25px;
+  border: solid;
+  border-color: #DCDCDC;
+  border-radius: 5px;
+  border-width: 1.5px;
+}
+
+#range-start-textbox{
+  margin-left: 0px;
+}
+
+#range-end-textbox{
+  margin-left: 20px;
+}
+
+.class-filter{
+  margin-top: 20px;
+}
+
+#filter-div{
+  border: none;
+  padding: 5px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 20px;
+  width: 45%;
+}
+
+.class-section-filter-div{
+  border: solid;
+  border-color: lightsalmon;
+  margin-block: 15px;
+  padding: 5px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 20px;
+  height: 45%
+}
+
+.class-filter-div{
+  border: solid;
+  border-color: lightsalmon;
+  margin-block: 5px;
+  padding: 5px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 20px;
+  width: 45%;
+}
+
+#phenotype-dropdown-div{
+  padding-top: 5%;
+}
+
+#dtable-header {
+  text-transform: none;
+}
+
+#dtable-textbox {
+  margin-top: -5%;
+}
+
+#sv-table-div{
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+#sv-button-collapse{
+  font-size: 14px;
+  color: turquoise;
+  border-color: turquoise;
+}
+
+#sv-button-collapse:hover:enabled{
+  background: turquoise;
+  color: #f5f5f5;
+  border-color: #55d0c4;
+}
+
+#sv-button-collapse:disabled{
+  background: #f5f5f5;
+}
+
+#sv-button-collapse:active{
+  background:#ffffff;
+}
+
+#sv-button-collapse:focus{
+  background:#ffffff;
+}
+
+#sv-button-div{
+  align-self: flex-start;
+}
+
+#anno-table .cell-0-1{
+    display: none;  
+  }
+
+#anno-table .dash-cell-value{
+  overflow-wrap: anywhere;
+}
+
+#snp-table .dash-cell-value{
+  color:#2F2E2D;
+  /* font-family: SIMPLIFICA; */
+  font-size: 15px;
+  display: inline;
+  white-space: inherit;
+  overflow: inherit;
+  text-overflow: inherit;
+}
+
+
+.sv-table{
+  margin-block: 5px;
+}
+
+.sv-anno-table{
+  border : solid;
+  border-color: lightsalmon;
+  margin-block: 5px;
+  padding: 5px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 20px;
+  align-self: flex-start;
+  width: 800px;
+}
+
+#scatter-plot-div{
+  display: flex;
+  justify-content: center;
+  align-items: top;
+  margin-left: 50px;
+  margin-right: 50px;
+}
+
+#toggle-d{
+  margin-right: 10px;
+}
+
+#toggle-r{
+  margin-left: 10px;
+}
+
+#toggle-region{
+  margin-top: 50px;
+  display: flex;
+  justify-content: space-between;;
+}
+
+#toggle-pheno-header{
+  margin-top: 50px;
+  margin-left: 10px;
+}
+
+#toggle-pheno{
+  margin-left: 10px;
+}
+
+#toggle-region-pheno{
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;;
+}
+
+#download-button{
+  font-size: 14px;
+  color: turquoise;
+  border-color: turquoise;
+  margin-right: -5em;
+}
+
+#download-button:hover:enabled{
+  background: turquoise;
+  color: #f5f5f5;
+  border-color: #55d0c4;
+}
+
+#download-button:disabled{
+  background: #cfcfcf;
+  border-color: #2f2e2d;
+  color: #2f2e2d;
+}
+
+#download-button:active{
+  background:#ffffff;
+}
+
+#download-button:focus{
+  background:#ffffff;
+}
+
+
+#download-region{
+  margin-left: 10px;
+  margin-top: 50px;
+}
+
+.loading_wrapper > div {
+  visibility: visible !important;
+}
+
+#scatter-plot .modebar-btn{
+  font-family: Nunito Sans;
+}
+
+.sections{
+  border : solid;
+  border-color: #2F2E2D;
+  margin-block: 5px;
+  padding: 5px;
+  margin-left: 50px;
+  margin-right: 50px;
+}
+
+#plot-header-div{
+  padding-top: 20px;
+}
