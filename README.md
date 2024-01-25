@@ -1,5 +1,5 @@
 # GWAS SVatalog    
     
-[GWAS SVatalog](https://svatalog.research.sickkids.ca/) is a web-based browsing and visualization tool to aid fine-mapping of GWAS loci with structural variations (SV). It is part of the LocusFocus suite of software tools (https://locusfocus.research.sickkids.ca/) (Panjwani et al. 2020) specializing in data integration of GWAS follow-up. The SVatalog allows users to visualize linkage disequilibrium (LD) between our structural variant database and GWAS-associated loci found in GWAS Catalog (Sollis et al. 2023).    
+[GWAS SVatalog](https://svatalog.research.sickkids.ca/) is a web-based browsing and visualization tool to aid fine-mapping of GWAS loci with structural variations (SV). It is part of the [LocusFocus](https://locusfocus.research.sickkids.ca/) suite of software tools (Panjwani et al. 2020) specializing in data integration of GWAS follow-up. The SVatalog allows users to visualize linkage disequilibrium (LD) between our structural variant database and GWAS-associated loci found in GWAS Catalog (Sollis et al. 2023).    
 
 The [GWAS SVatalog documentation](https://gwas-svatalog-docs.readthedocs.io/en/latest/index.html) provides details on how to use the tool.
