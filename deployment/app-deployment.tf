@@ -10,7 +10,7 @@ variable "deployment_region" {
 
 variable "app_version" {
   description = "App Version"
-  default     = "1.0"
+  default     = "1.0.1"
 }
 
 variable "lb_ssl" {
@@ -110,7 +110,7 @@ resource "google_cloud_run_v2_service" "app" {
       max_instance_count = 10
     }
     containers {
-      image = "northamerica-northeast2-docker.pkg.dev/dnastack-sickkids-strug-lab/gwas-svatalog:1.0.16"
+      image = "northamerica-northeast2-docker.pkg.dev/dnastack-sickkids-strug-lab/webapp/gwas-svatalog:${var.app_version}"
 
       resources {
         limits = {

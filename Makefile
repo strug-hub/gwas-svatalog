@@ -1,4 +1,4 @@
-PROD_IMAGE=northamerica-northeast2-docker.pkg.dev/dnastack-sickkids-strug-lab/gwas-svatalog
+PROD_IMAGE=northamerica-northeast2-docker.pkg.dev/dnastack-sickkids-strug-lab/webapp/gwas-svatalog
 PROD_VER=$$(git describe | awk -F'[-]' '{print $$1"."$$2}')
 
 .PHONY: image
