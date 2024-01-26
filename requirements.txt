@@ -43,7 +43,7 @@ pexpect==4.8.0
 pickleshare==0.7.5
 platformdirs==3.5.0
 plotly==5.14.1
-polars==0.17.9
+polars~=0.18
 prompt-toolkit==3.0.38
 psutil==5.9.5
 ptyprocess==0.7.0

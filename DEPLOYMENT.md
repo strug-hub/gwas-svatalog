@@ -4,10 +4,19 @@
 
 ## Minimum System Requirements
 
+### Server
+
 * Python 3.9
 * Python source code for some dependencies
 * [Dependencies listed in `requirements.txt`](./requirements.txt)
 * 10 GB of RAM
+
+### Deployer's Machine
+
+* Docker
+* Terraform
+* Access to GCP Project "dnastack-sickkids-strug-lab"
+  * Only DNAstack has the access to the GCP project.
 
 ## Deployment with Docker and Docker Compose
 
@@ -28,12 +37,7 @@
    make dev-run
    ```
 
-## Deployment with Google Kubernetes Engine (WIP)
+## Deployment with Cloud Run
 
-> ⚠️ This section is still in progress.
-
-### Requirements
-
-* Access to the GCP project
-
-(TBC)
+1. Run `make image`
+2.

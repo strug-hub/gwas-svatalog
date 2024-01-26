@@ -8,6 +8,11 @@ variable "deployment_region" {
   default     = "northamerica-northeast2"
 }
 
+variable "app_version" {
+  description = "App Version"
+  default     = "1.0"
+}
+
 variable "lb_ssl" {
   description = "Load Balancer SSL"
   default     = true
@@ -105,7 +110,7 @@ resource "google_cloud_run_v2_service" "app" {
       max_instance_count = 10
     }
     containers {
-      image = "northamerica-northeast2-docker.pkg.dev/dnastack-sickkids-strug-lab/webapp/shalvichirmade-gwas-svatalog:1.0.16"
+      image = "northamerica-northeast2-docker.pkg.dev/dnastack-sickkids-strug-lab/gwas-svatalog:1.0.16"
 
       resources {
         limits = {
