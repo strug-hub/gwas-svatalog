@@ -2,72 +2,15 @@ import dash_bootstrap_components as dbc
 import dash_daq as daq
 import heapq
 import numpy as np
+import glob
 import os
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import psutil
-import threading
 
 from dash import Dash, dcc, html, dash_table, Input, Output, State, ctx
-from dnastack.common.environments import flag, env
-from dnastack.common.logger import get_logger
-from dotenv import load_dotenv
-from glob import glob
 from gtfparse import read_gtf # gtfparse==1.3.0
-from time import sleep
 
-# import dash_mantine_components as dmc
-# from dash_iconify import DashIconify
-# from dash.exceptions import PreventUpdate
-
-if os.path.exists('.env'):
-    load_dotenv()
-
-logger = get_logger('svatalog')
-
-current_working_dir = os.getcwd()
-gwas_catalog_data_file_path = env('GWAS_CATALOG_DATA_FILE',
-                                  description='The file path to the GWAS Catalog data',
-                                  default="data/gwas_catalog_v1.0-associations_e108.tsv",
-                                  required=False)
-sv_annotation_data_file_path = env('SV_ANNOTATION_DATA_FILE',
-                                   description='The file path to the SV annotation data',
-                                   default="data/sv_annotations.tsv",
-                                   required=False)
-gene_exon_data_file_path = env('GENE_EXON_DATA_FILE',
-                               description='The file path to the gene/exon data',
-                               default='data/MANE.GRCh38.v1.0.ensembl_genomic.gtf',
-                               required=False)
-additional_file_dir = env('ADDITIONAL_FILE_DIR',
-                          description='The path to the directory of additional files',
-                          default='data/linkage',
-                          required=False)
-
-for sample_path in [gwas_catalog_data_file_path, sv_annotation_data_file_path, gene_exon_data_file_path]:
-    if os.path.exists(sample_path):
-        logger.debug(f'{sample_path}: ✅ Found')
-    else:
-        logger.error(f'{sample_path}: ❌ Not Found')
-        raise RuntimeError(f'{sample_path} is expected but does not exist.')
-
-_proc_inspector_logger = get_logger('svatalog.proc_inspector')
-_proc_inspector_metadata = dict(memory_usage_percent=0)
-def __inspect_process():
-    __b_to_gb = lambda x: x / 1024.0 / 1024.0 / 1024.0
-    while True:
-        memory_usage = psutil.virtual_memory()
-        current_memory_usage_percent = memory_usage.percent
-        if _proc_inspector_metadata["memory_usage_percent"] != current_memory_usage_percent:
-            _proc_inspector_metadata["memory_usage_percent"] = current_memory_usage_percent
-            _proc_inspector_logger.info(f'PROC: MEMORY: {current_memory_usage_percent}% '
-                                        f'(Used: {__b_to_gb(memory_usage.total - memory_usage.available):.3}/{__b_to_gb(memory_usage.total):.3} GB)')
-        sleep(env('SVATALOG_PROC_INSPECT_INTERVAL',
-                  default=5,
-                  description='Process inspection interval in seconds',
-                  transform=lambda x: int(x),
-                  required=False))
-threading.Thread(target=__inspect_process, daemon=True).start()  # Start the background thread.
 
 app = Dash(__name__, 
            external_stylesheets = [dbc.themes.LUX, dbc.icons.BOOTSTRAP],
@@ -78,18 +21,15 @@ app._favicon = "assets/favicon.ico"
 
 #### READ IN REQUIRED DATA ####
 
-logger.info('🔥 Loading the GWAS catalog data...')
 ## GWAS Catalog data v1.0 - downloaded on January 14, 2023 and edited by Dr. Zhuozhi Wang.
     # Expanded SNP haplotypes to match the multiple chromosome locations
     # Used dbSNP151 to correspond the correct rsID to the chromosome location when multiple rsIDs were provided
-DF_GWAS_FULL = pd.read_csv(gwas_catalog_data_file_path,
-                           low_memory=True,
+DF_GWAS_FULL = pd.read_csv("data/gwas_catalog_v1.0-associations_e108.tsv",
                            sep = "\t",
                            header = 0,
                            dtype = {"PUBMEDID" : "object",
                                     "LINK" : "object",
                                     "P-VALUE" : "float64"})
-logger.info('✅ Loaded the GWAS catalog data')
 
 df_gwas = DF_GWAS_FULL[["CHR_ID",
                         "CHR_POS",
@@ -130,15 +70,13 @@ df_gwas["Risk_Allele"] = df_gwas["Risk_Allele"].str.split("-").str[1]
 
 df_gwas = df_gwas[df_gwas["P-Value"] <= 1]
 
-logger.info('🔥 Loading the SV annotation data...')
+
 ## SV Annotation data - created by Dr. Zhuozhi Wang on March 13, 2023
-DF_ANNO_FULL = pd.read_csv(sv_annotation_data_file_path,
-                           low_memory=True,
+DF_ANNO_FULL = pd.read_csv("data/sv_annotations.tsv",
                            sep = "\t",
                            header = 0,
                            dtype = {"startAnn" : "Int64",
                                     "endAnn" : "Int64"})
-logger.info('✅ Loaded the SV annotation data')
 
 df_anno = DF_ANNO_FULL[["chrAnn",
                         "startAnn",
@@ -155,54 +93,48 @@ df_anno.columns =["Chromosome",
                   "SV_Length"]
 
 
-## SV-SNP Linkage data created by Dr. Zhuozhi Wang on April 6, 2023
-logger.info('🔥 Loading the linkage frequency data...')
-plink_file_paths = glob(env('PLINK_FILE_SEARCH_PATTERN',
-                            default=os.path.join('data/LD/*_ld_stats.txt'),
-                            description='Simple PLINK File Path Search Pattern',
-                            required=False))
-plink_tables = [
-    pd.read_table(file_path,
-                  low_memory=True,
-                  header=0,
-                  names=["SNP_Name", "SNP_Position", "SV_Name", "SV_Position", "R2", "D'"])
-    for file_path in plink_file_paths
-]
-if not plink_tables:
-    raise RuntimeError('No plink tables found')
-DF_LINKAGE = pd.concat(plink_tables)
-logger.info('✅ Loaded the linkage frequency data')
+## SV-SNP LD data created by Dr. Zhuozhi Wang on April 6, 2023
+LD_file_paths = glob.glob(os.path.join("data/LD",
+                                       "*_ld_stats.txt"))
+LD_tables = [pd.read_table(file_path,
+                           header = 0,
+                           names = ["SNP_Name", 
+                                    "SNP_Position",
+                                    "SV_Name",
+                                    "SV_Position",
+                                    "R2",
+                                    "D'"])
+             for file_path in LD_file_paths]
 
-logger.info('🔥 Loading the allele stat data...')
+DF_LD = pd.concat(LD_tables)
+
+
 ## SV/SNP allele annotations done by Thomas Nalpathamkalam on April 10, 2023
-allele_file_paths = glob(env('ALLELE_FILE_SEARCH_PATTERN',
-                             default=os.path.join('data/LD/*_allele_freq.txt'),
-                             description='Simple ALLELE File Path Search Pattern',
-                             required=False))
-allele_tables = [
-    pd.read_table(file_path,
-                  low_memory=True,
-                  header=0,
-                  names=["Chromosome", "SNP_Position", "SV_SNP_Name", "Reference_Allele", "Alternate_Allele",
-                         "Sample_AF", "gnomAD_nfe_AF", "dbSNP"])
-    for file_path in allele_file_paths
-]
-if not allele_tables:
-    raise RuntimeError('No allele tables found')
+allele_file_paths = glob.glob(os.path.join("data/LD",
+                                            "*_allele_freq.txt"))
+allele_tables = [pd.read_table(file_path,
+                               header = 0,
+                               names = ["Chromosome",
+                                        "SNP_Position",
+                                        "SV_SNP_Name",
+                                        "Reference_Allele",
+                                        "Alternate_Allele",
+                                        "Sample_AF",
+                                        "gnomAD_nfe_AF",
+                                        "dbSNP"])
+                 for file_path in allele_file_paths]
+
 DF_ALLELE = pd.concat(allele_tables)
-logger.info('✅ Loaded the allele stat data')
+
 
 ## Gene/exon data from MANE.GRCh38.v1.0.ensembl_genomic.gtf extracted January 5, 2023
-logger.info('🔥 Parsing the GTF data...')
-DF_GTF = read_gtf(gene_exon_data_file_path)
-logger.info('🔥 Loading the GTF data...')
-DF_GTF = pd.DataFrame(data = DF_GTF)
-logger.info('✅ Loaded the GTF data')
 
-logger.info('🔥 Preparing data...')
+DF_GTF = read_gtf("data/MANE.GRCh38.v1.0.ensembl_genomic.gtf")
+DF_GTF = pd.DataFrame(data = DF_GTF)
 
 df_gene = DF_GTF[(DF_GTF["feature"] == "transcript") | \
                  (DF_GTF["feature"] == "exon")]
+
 df_gene = df_gene[df_gene["tag"].str.contains("MANE_Select")]
 df_gene = df_gene[["seqname",
                     "start", 
@@ -267,7 +199,7 @@ df_sv_anno = df_sv_anno.iloc[:,columns_range]
 
 
 ## Creation of SV table for easier access of data required - join the dataframes based on SV names
-df_sv_join = DF_LINKAGE.merge(df_anno,
+df_sv_join = DF_LD.merge(df_anno,
                               on = "SV_Name",
                               how = "left")
 
@@ -281,7 +213,7 @@ df_sv_join = df_sv_join[["Chromosome",
                          "D'"]]
 
 
-## Merging SV allele information with the linkage dataset
+## Merging SV allele information with the LD dataset
 df_sv_join = df_sv_join.merge(df_sv_allele,
                               on = ["Chromosome",
                                     "SV_Name"],
@@ -298,7 +230,7 @@ df_sv_join.loc[df_sv_join["SV_Type"] == "<INV>", "SV_Type"] = "Inversion"
 df_sv_join = df_sv_join.iloc[:, [0,1,2,3,8,9,4,5,6,7]]
 
 
-## Merging SNP allele information with the linkage dataset
+## Merging SNP allele information with the LD dataset
 df_sv_snp_join = df_sv_join.merge(df_snp_allele,
                                   on = ["Chromosome",
                                         "SNP_Name",
@@ -1940,18 +1872,11 @@ def download_plot_data(n_clicks, relayoutData, toggle, toggle_pheno):
                     df_download = pd.concat([df_download, df_extra])
             #raise PreventUpdate
 
-
         return dcc.send_data_frame(df_download.to_csv, "gwas_svatalog_snp_data.csv")
 
 
 
-
 if __name__ == '__main__':
-    logger.info('✅ The server is ready.')
-    app.run_server(debug = not flag('SVATALOG_DEBUG_DISABLED'),
-                   host = "0.0.0.0",
-                   port = env('PORT',
-                              default=1234,
-                              required=False,
-                              transform=lambda v: int(v),
-                              description='Listening Port'))
+    app.run_server(debug = True,
+                   host = "127.0.0.1",
+                   port = 1234)
