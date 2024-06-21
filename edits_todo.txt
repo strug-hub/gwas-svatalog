@@ -1,0 +1,5 @@
+Future changes/edits to be made:
+
+- Fix computational time - taking too long to load genes in the plot
+- Fix computational memory - switch away from pandas df
+- Change URL link for coloc 
