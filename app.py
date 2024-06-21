@@ -1879,4 +1879,4 @@ def download_plot_data(n_clicks, relayoutData, toggle, toggle_pheno):
 if __name__ == '__main__':
     app.run_server(debug = True,
                    host = "127.0.0.1",
-                   port = 1234)
+                   port = 4321)
