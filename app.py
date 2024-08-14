@@ -75,15 +75,15 @@ df_gwas = df_gwas[df_gwas["P-Value"] <= 1]
 DF_ANNO_FULL = pd.read_csv("data/sv_annotations.tsv",
                            sep = "\t",
                            header = 0,
-                           dtype = {"startAnn" : "Int64",
-                                    "endAnn" : "Int64"})
+                           dtype = {"Start" : "Int64",
+                                    "End" : "Int64"})
 
-df_anno = DF_ANNO_FULL[["chrAnn",
-                        "startAnn",
-                        "endAnn",
+df_anno = DF_ANNO_FULL[["Chromosome",
+                        "Start",
+                        "End",
                         "ID",
-                        "variantTypeAnn",
-                        "sizeAnn"]]
+                        "Type",
+                        "Length"]]
 
 df_anno.columns =["Chromosome",
                   "SV_Start",
@@ -178,30 +178,25 @@ df_snp_allele = df_snp_allele.drop_duplicates()
 ## Subset DF_ANNO_FULL with columns that can be displayed to the public. Add SV AF to this table as well.
 df_sv_anno = DF_ANNO_FULL
 
-df_sv_anno = df_sv_anno.rename(columns = {"chrAnn" : "Chromosome",
-                                          "startAnn" : "SV_Start",
-                                          "endAnn" : "SV_End",
-                                          "variantTypeAnn" : "SV_Type",
-                                          "sizeAnn" : "SV_Length"})
-
 df_sv_anno = df_sv_anno.merge(df_sv_allele.iloc[:,[1,2,3]],
                               left_on = "ID",
                               right_on = "SV_Name")
 
 df_sv_anno = df_sv_anno.drop(columns = "Alternate_Allele")
 
-columns_range = list(range(1,33))
-columns_range.insert(0, 33)
-columns_range.insert(6, 34)
+columns_range = list(range(1,(df_sv_anno.shape[1]-2)))
+columns_range.insert(0, (df_sv_anno.shape[1]-2))
+columns_range.insert(6, (df_sv_anno.shape[1]-1))
 
 df_sv_anno = df_sv_anno.iloc[:,columns_range]
-
+df_sv_anno = df_sv_anno.rename(columns = {"SV_Name" : "SV Name",
+                                          "Sample_AF" : "SV Sample AF"})
 
 
 ## Creation of SV table for easier access of data required - join the dataframes based on SV names
 df_sv_join = DF_LD.merge(df_anno,
-                              on = "SV_Name",
-                              how = "left")
+                         on = "SV_Name",
+                         how = "left")
 
 df_sv_join = df_sv_join[["Chromosome",
                          "SV_Name",
@@ -500,24 +495,21 @@ def make_table(chrom = chromosomes,
         strand = df_1gene.iat[0,3]
 
         sv_list_gene = df_sv_anno[(df_sv_anno["Chromosome"] == chrom) & \
-                                  (df_sv_anno["SV_Start"] >= (start - 100000)) & \
-                                  (df_sv_anno["SV_End"] <= (end + 100000))]
+                                  (df_sv_anno["Start"] >= (start - 100000)) & \
+                                  (df_sv_anno["End"] <= (end + 100000))]
 
-        sv_list_gene = list(sv_list_gene["SV_Name"])
+        sv_list_gene = list(sv_list_gene["SV Name"])
 
 
     # Find overlaps sv's from all lists
     sv_list_complete = set(sv_list_pheno).intersection(sv_list_chr, sv_list_gene, sv_list_range)
 
-    tab_show = df_sv_anno[df_sv_anno["SV_Name"].isin(sv_list_complete)]
-    tab_show = tab_show[["SV_Name", "Chromosome", "SV_Start", "SV_End", "SV_Type", "SV_Length", "Sample_AF"]]
-    tab_show = tab_show.rename(columns = {"SV_Name" : "ID",
+    tab_show = df_sv_anno[df_sv_anno["SV Name"].isin(sv_list_complete)]
+    tab_show = tab_show[["SV Name", "Chromosome", "Start", "End", "Type", "Length", "SV Sample AF"]]
+    tab_show = tab_show.rename(columns = {"SV Name" : "ID",
                                           "Chromosome" : "Chrom",
-                                          "SV_Start" : "Start",
-                                          "SV_End" : "End",
-                                          "SV_Type" : "Type",
-                                          "SV_Length" : "Size (bp)",
-                                          "Sample_AF" : "AF"})
+                                          "Length" : "Size (bp)",
+                                          "SV Sample AF" : "AF"})
 
     return dash_table.DataTable(id ='strvar-table',
                                 data = tab_show.to_dict("records"),
@@ -555,7 +547,7 @@ def make_annotation_table(sv = "None"):
                                                     'fontWeight': 'bold'})
 
     else:
-        df_anno_subset_sv = df_sv_anno[df_sv_anno["SV_Name"] == sv]
+        df_anno_subset_sv = df_sv_anno[df_sv_anno["SV Name"] == sv]
         df_anno_subset_sv = df_anno_subset_sv.transpose()
         df_anno_subset_sv = df_anno_subset_sv.rename_axis(" ").reset_index()
         df_anno_subset_sv.columns = ["Header", "Information"]
