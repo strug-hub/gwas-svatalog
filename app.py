@@ -18,6 +18,8 @@ app = Dash(__name__,
 
 app._favicon = "assets/favicon.ico"
 
+server = app.server
+
 
 #### READ IN REQUIRED DATA ####
 
