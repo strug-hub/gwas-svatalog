@@ -734,7 +734,7 @@ def make_plot(sv = "None",
             sc_plot.update_traces(marker = dict(color = "rgba(57,201,187,0.5)",
                                                 line = dict(color = "rgba(57,201,187,1)"),
                                                 size = 10),
-                                  hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + '<br>SNP Name: %{customdata[1]}' + '<br>Chromosome: %{customdata[2]}' + '<br>SNP Position: %{customdata[3]}' + '<br>P-Value: %{customdata[4]}' + '<br>R2: %{customdata[5]}' + "<br>D': %{customdata[6]}",
+                                  hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + '<br>SNP Name: %{customdata[1]}' + '<br>Chromosome: %{customdata[2]}' + '<br>SNP Position: %{customdata[3]}' + '<br>P-Value: %{customdata[4]}' + '<br>r2: %{customdata[5]}' + "<br>D': %{customdata[6]}",
                                   customdata = [tab_label_maker(row) for row in tab_lab])
 
             sc_plot.update_xaxes(showspikes = True,
@@ -818,7 +818,7 @@ def make_plot(sv = "None",
                                            marker = dict(size = 10,
                                                          color = "rgba(168,168,168,0.5)",
                                                          line = dict(color = "rgba(168,168,168,1)")),
-                                           hovertemplate = '<br><b>SNP Name: %{customdata[0]}</b>' +'<br>Chromosome: %{customdata[1]}' + '<br>SNP Position: %{customdata[2]}' + '<br>R2: %{customdata[3]}' + "<br>D': %{customdata[4]}",
+                                           hovertemplate = '<br><b>SNP Name: %{customdata[0]}</b>' +'<br>Chromosome: %{customdata[1]}' + '<br>SNP Position: %{customdata[2]}' + '<br>r2: %{customdata[3]}' + "<br>D': %{customdata[4]}",
                                            customdata = [extra_label_maker(row) for row in df_lab],
                                            showlegend = False,
                                            name = "Not in \nGWAS Catalog"))
@@ -1353,7 +1353,7 @@ NAVBAR = dbc.NavbarSimple(id = 'navbar-lf',
                           links_left = True,
                           expand = "lg",
                           children = [dbc.NavItem(dbc.NavLink("Colocalization",
-                                                              href = "https://locusfocus.research.sickkids.ca/colocalization",
+                                                              href = "https://locusfocus.research.sickkids.ca/",
                                                               target = "_blank",
                                                               class_name = 'navbar-items')),
                                       dbc.NavItem(dbc.NavLink("Set-Based Test",
@@ -1629,7 +1629,10 @@ def update_sv_textbox(data, selected_rows, range_start, range_end):
 def update_anno_table(selected_rows):
 
     if selected_rows:
-        sv_selected = tab_show.iloc[selected_rows[0],[0]][0]
+        # sv_selected = tab_show.iloc[selected_rows[0],[0]][0]
+        row_label = tab_show.index[selected_rows[0]]
+        col_label = tab_show.columns[0]
+        sv_selected = tab_show.loc[row_label, col_label]
         new_anno_table = make_annotation_table(sv = sv_selected)
 
     else:
@@ -1670,7 +1673,10 @@ def update_plot(selected_rows, pheno, toggle, toggle_pheno):
     toggle_pheno = False if toggle_pheno is None else toggle_pheno
 
     if selected_rows:
-        sv_name = tab_show.iloc[selected_rows[0],[0]][0]
+        # sv_name = tab_show.iloc[selected_rows[0],[0]][0]
+        row_label = tab_show.index[selected_rows[0]]
+        col_label = tab_show.columns[0]
+        sv_name = tab_show.loc[row_label, col_label]
         button = False
 
     else:
