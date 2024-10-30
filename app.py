@@ -839,8 +839,8 @@ def make_plot(sv = "None",
             # gene_line_position = -0.3
 
             for i in range(0,len(exons_genes)):
-                row = exons_genes.iloc[i]
-                gene_line_position = float(df_transcript["y_coord_nopheno"][df_transcript["gene"] == row["gene"]].iloc[0]) 
+                row = exons_genes.loc[exons_genes.index[i]]
+                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_nopheno"].values[0]) 
 
                 sc_plot.add_shape(type = "line",
                                 x0 = (row["start"]),
@@ -874,8 +874,8 @@ def make_plot(sv = "None",
             exons_exons = exons[exons["feature"] == "exon"]
 
             for i in range(0,len(exons_exons)):
-                row = exons_exons.iloc[i]
-                gene_line_position = float(df_transcript["y_coord_nopheno"][df_transcript["gene"] == row["gene"]].iloc[0])
+                row = exons_exons.loc[exons_exons.index[i]]
+                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_nopheno"].values[0]) 
                 sc_plot.add_shape(type = "rect",
                                 x0 = (row["start"]),
                                 x1 = (row["end"]),
@@ -1095,8 +1095,8 @@ def make_plot(sv = "None",
             # gene_line_position = -6.25
 
             for i in range(0,len(exons_genes)):
-                row = exons_genes.iloc[i]
-                gene_line_position = float(df_transcript["y_coord_pheno"][df_transcript["gene"] == row["gene"]].iloc[0]) 
+                row = exons_genes.loc[exons_genes.index[i]]
+                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_pheno"].values[0])  
                 sc_plot.add_shape(type = "line",
                                 x0 = (row["start"]),
                                 x1 = (row["end"]),
@@ -1149,8 +1149,8 @@ def make_plot(sv = "None",
             exons_exons = exons[exons["feature"] == "exon"]
 
             for i in range(0,len(exons_exons)):
-                row = exons_exons.iloc[i]
-                gene_line_position = float(df_transcript["y_coord_pheno"][df_transcript["gene"] == row["gene"]].iloc[0]) 
+                row = exons_exons.loc[exons_exons.index[i]]
+                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_pheno"].values[0]) 
                 sc_plot.add_shape(type = "rect",
                                 x0 = (row["start"]),
                                 x1 = (row["end"]),
@@ -1248,11 +1248,11 @@ def make_SNP_table(snp = "None"):
     else:
         df_snp = df_full_join[(df_full_join["SNP_Name_dbSNP"] == snp) | (df_full_join["SNP_Name_GWAS"] == snp)]
 
-        df_snp["Link"] = "[" + df_snp["Pubmed_ID"] + "]" + "(https://" + df_snp["Link"] + ")"
+        df_snp.loc[:, "Link"] = "[" + df_snp["Pubmed_ID"] + "]" + "(https://" + df_snp["Link"] + ")"
 
-        df_snp["SNP_Name_dbSNP"] = "[" + df_snp["SNP_Name_dbSNP"] + "]" + "(https://www.ncbi.nlm.nih.gov/snp/" + df_snp["SNP_Name_dbSNP"] + ")"
+        df_snp.loc[:, "SNP_Name_dbSNP"] = "[" + df_snp["SNP_Name_dbSNP"] + "]" + "(https://www.ncbi.nlm.nih.gov/snp/" + df_snp["SNP_Name_dbSNP"] + ")"
 
-        df_snp["SNP_Name_GWAS"] = "[" + df_snp["SNP_Name_GWAS"] + "]" + "(https://www.ebi.ac.uk/gwas/variants/" + df_snp["SNP_Name_GWAS"] + ")"
+        df_snp.loc[:, "SNP_Name_GWAS"] = "[" + df_snp["SNP_Name_GWAS"] + "]" + "(https://www.ebi.ac.uk/gwas/variants/" + df_snp["SNP_Name_GWAS"] + ")"
 
         df_snp = df_snp[["Chromosome",
                          "SNP_Position",
