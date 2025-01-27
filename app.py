@@ -7,12 +7,15 @@ import os
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import polars as pl
+import pyarrow
 
 from dash import Dash, dcc, html, dash_table, Input, Output, State, ctx
+from jupyter_dash import JupyterDash
 from gtfparse import read_gtf # gtfparse==1.3.0
 
 
-app = Dash(__name__, 
+app = JupyterDash(__name__, 
            external_stylesheets = [dbc.themes.LUX, dbc.icons.BOOTSTRAP],
            title = "GWAS SVatalog")
 
@@ -21,311 +24,279 @@ app._favicon = "assets/favicon.ico"
 server = app.server
 
 
-#### READ IN REQUIRED DATA ####
-
-## GWAS Catalog data v1.0 - downloaded on January 14, 2023 and edited by Dr. Zhuozhi Wang.
-    # Expanded SNP haplotypes to match the multiple chromosome locations
-    # Used dbSNP151 to correspond the correct rsID to the chromosome location when multiple rsIDs were provided
-DF_GWAS_FULL = pd.read_csv("data/gwas_catalog_v1.0-associations_e108.tsv",
-                           sep = "\t",
-                           header = 0,
-                           dtype = {"PUBMEDID" : "object",
-                                    "LINK" : "object",
-                                    "P-VALUE" : "float64"})
-
-df_gwas = DF_GWAS_FULL[["CHR_ID",
-                        "CHR_POS",
-                        "SNPS",
-                        "STRONGEST SNP-RISK ALLELE",
-                        "RISK ALLELE FREQUENCY",
-                        "DISEASE/TRAIT",
-                        "STUDY",
-                        "PUBMEDID",
-                        "LINK",
-                        "P-VALUE"]]
+DF_GWAS_FULL = pl.read_csv("data/gwas_catalog_v1.0-associations_e108.tsv",
+                           separator = "\t",
+                           quote_char = '',
+                           dtypes = {"PUBMEDID": pl.Utf8, 
+                                     "LINK": pl.Utf8,
+                                     "P-VALUE": pl.Float64},
+                           infer_schema_length = 1_000_000)
 
 
-# Remove the rows with empty chromosome location
-df_gwas = df_gwas.dropna(subset = "CHR_ID")
+df_gwas = DF_GWAS_FULL.select([
+    pl.col("CHR_ID"),
+    pl.col("CHR_POS").cast(pl.Int32),
+    pl.col("SNPS"),
+    pl.col("STRONGEST SNP-RISK ALLELE"),
+    pl.col("RISK ALLELE FREQUENCY"),
+    pl.col("DISEASE/TRAIT"),
+    pl.col("STUDY"),
+    pl.col("PUBMEDID"),
+    pl.col("LINK"),
+    pl.col("P-VALUE")
+]).drop_nulls(["CHR_ID"]).with_columns([
+    (pl.lit("chr") + pl.col("CHR_ID")).alias("CHR_ID"),
+    pl.col("SNPS").str.split(";").arr.first(),
+    pl.col("STRONGEST SNP-RISK ALLELE").str.split("-").arr.last()
+]).filter(pl.col("P-VALUE") <= 1)
 
-# Use the first rsID only
-df_gwas["SNPS"] = df_gwas["SNPS"].str.split(";").str[0]
-
-# Change dtype of chromosome position - prevent decimals. Could not do before as there were ; in rows
-df_gwas["CHR_POS"] = df_gwas["CHR_POS"].astype(int)
-
-df_gwas.columns = ["Chromosome",
-                   "SNP_Position",
-                   "SNP_Name_GWAS",
-                   "Risk_Allele",
-                   "Risk_Allele_Frequency",
-                   "Phenotype",
-                   "Study",
-                   "Pubmed_ID",
-                   "Link",
-                   "P-Value"]
-
-
-df_gwas["Chromosome"] = "chr" + df_gwas["Chromosome"].astype(str)
-
-df_gwas["Risk_Allele"] = df_gwas["Risk_Allele"].str.split("-").str[1]
-
-df_gwas = df_gwas[df_gwas["P-Value"] <= 1]
+# Rename columns in the output
+df_gwas = df_gwas.rename({
+    "CHR_ID": "Chromosome",
+    "CHR_POS" : "SNP_Position",
+    "SNPS": "SNP_Name_GWAS",
+    "STRONGEST SNP-RISK ALLELE": "Risk_Allele",
+    "RISK ALLELE FREQUENCY": "Risk_Allele_Frequency",
+    "DISEASE/TRAIT": "Phenotype",
+    "STUDY": "Study",
+    "PUBMEDID": "Pubmed_ID",
+    "LINK": "Link",
+    "P-VALUE": "P-Value"
+})
 
 
 ## SV Annotation data - created by Dr. Zhuozhi Wang on March 13, 2023
-DF_ANNO_FULL = pd.read_csv("data/sv_annotations.tsv",
-                           sep = "\t",
-                           header = 0,
-                           dtype = {"Start" : "Int64",
-                                    "End" : "Int64"})
+DF_ANNO_FULL = pl.read_csv("data/sv_annotations.tsv",
+                           separator = "\t",
+                           quote_char = '',
+                           infer_schema_length = 1_000_000)
 
-df_anno = DF_ANNO_FULL[["Chromosome",
-                        "Start",
-                        "End",
-                        "ID",
-                        "Type",
-                        "Length"]]
-
-df_anno.columns =["Chromosome",
-                  "SV_Start",
-                  "SV_End",
-                  "SV_Name",
-                  "SV_Type",
-                  "SV_Length"]
+# Select and rename specific columns
+df_anno = DF_ANNO_FULL.select([
+    pl.col("Chromosome"),
+    pl.col("Start").alias("SV_Start"),
+    pl.col("End").cast(pl.Int64).alias("SV_End"),
+    pl.col("ID").alias("SV_Name"),
+    pl.col("Type").alias("SV_Type"),
+    pl.col("Length").alias("SV_Length")
+])
 
 
-## SV-SNP LD data created by Dr. Zhuozhi Wang on April 6, 2023
 LD_file_paths = glob.glob(os.path.join("data/LD",
                                        "*_ld_stats.txt"))
-LD_tables = [pd.read_table(file_path,
-                           header = 0,
-                           names = ["SNP_Name", 
-                                    "SNP_Position",
-                                    "SV_Name",
-                                    "SV_Position",
-                                    "R2",
-                                    "D'"])
+LD_tables = [pl.read_csv(file_path,
+                         separator = "\t",
+                         has_header = True,
+                         new_columns = ["SNP_Name", 
+                                        "SNP_Position",
+                                        "SV_Name",
+                                        "SV_Position",
+                                        "R2",
+                                        "D'"])
              for file_path in LD_file_paths]
 
-DF_LD = pd.concat(LD_tables)
+DF_LD = pl.concat(LD_tables)
 
 
 ## SV/SNP allele annotations done by Thomas Nalpathamkalam on April 10, 2023
 allele_file_paths = glob.glob(os.path.join("data/LD",
                                             "*_allele_freq.txt"))
-allele_tables = [pd.read_table(file_path,
-                               header = 0,
-                               names = ["Chromosome",
-                                        "SNP_Position",
-                                        "SV_SNP_Name",
-                                        "Reference_Allele",
-                                        "Alternate_Allele",
-                                        "Sample_AF",
-                                        "gnomAD_nfe_AF",
-                                        "dbSNP"])
+allele_tables = [pl.read_csv(file_path,
+                             separator = "\t",
+                             has_header = True,
+                             new_columns = ["Chromosome",
+                                            "SNP_Position",
+                                            "SV_SNP_Name",
+                                            "Reference_Allele",
+                                            "Alternate_Allele",
+                                            "Sample_AF",
+                                            "gnomAD_nfe_AF",
+                                            "dbSNP"])
                  for file_path in allele_file_paths]
 
-DF_ALLELE = pd.concat(allele_tables)
+DF_ALLELE = pl.concat(allele_tables)
 
 
 ## Gene/exon data from MANE.GRCh38.v1.0.ensembl_genomic.gtf extracted January 5, 2023
-
 DF_GTF = read_gtf("data/MANE.GRCh38.v1.0.ensembl_genomic.gtf")
-DF_GTF = pd.DataFrame(data = DF_GTF)
 
-df_gene = DF_GTF[(DF_GTF["feature"] == "transcript") | \
-                 (DF_GTF["feature"] == "exon")]
-
-df_gene = df_gene[df_gene["tag"].str.contains("MANE_Select")]
-df_gene = df_gene[["seqname",
-                    "start", 
-                    "end", 
-                    "strand", 
-                    "feature", 
-                    "gene_name"]]
-
-df_gene.columns = ["chr",
-                   "start",
-                   "end",
-                   "strand",
-                   "feature",
-                   "gene"]
+df_gene = pl.DataFrame(DF_GTF).filter(
+    (pl.col("feature") == "transcript") | (pl.col("feature") == "exon")
+).filter(pl.col("tag").str.contains("MANE_Select")).select([
+    pl.col("seqname").alias("chr"),
+    pl.col("start").cast(pl.Int64),
+    pl.col("end").cast(pl.Int64),
+    pl.col("strand"),
+    pl.col("feature"),
+    pl.col("gene_name").alias("gene")
+])
 
 
 #### DATA WRANGLING ####
 ## Subset allele data for only SV information
-df_sv_allele = DF_ALLELE[DF_ALLELE["SV_SNP_Name"].str.startswith("P")]
-
-df_sv_allele = df_sv_allele.rename(columns = {"SV_SNP_Name" : "SV_Name"})
-
-df_sv_allele = df_sv_allele.drop(["Reference_Allele",
-                                  "SNP_Position",
-                                  "gnomAD_nfe_AF",
-                                  "dbSNP"],
-                                 axis = 1)
-
-df_sv_allele = df_sv_allele.drop_duplicates()
+df_sv_allele = (DF_ALLELE
+                .filter(pl.col("SV_SNP_Name").str.starts_with("P"))
+                .rename({"SV_SNP_Name": "SV_Name"})
+                .drop(["Reference_Allele", "SNP_Position", "gnomAD_nfe_AF", "dbSNP"])
+                .unique())
 
 
 ## Subset allele data for only SNP information
-df_snp_allele = DF_ALLELE[~DF_ALLELE["SV_SNP_Name"].str.startswith("P")]
-
-df_snp_allele = df_snp_allele.rename(columns = {"SV_SNP_Name" : "SNP_Name"})
-
-df_snp_allele = df_snp_allele.drop_duplicates()
-
+df_snp_allele = (DF_ALLELE.filter(~pl.col("SV_SNP_Name").str.starts_with("P"))
+                 .rename({"SV_SNP_Name": "SNP_Name"})
+                 .unique())
 
 
 ## Subset DF_ANNO_FULL with columns that can be displayed to the public. Add SV AF to this table as well.
-df_sv_anno = DF_ANNO_FULL
-
-df_sv_anno = df_sv_anno.merge(df_sv_allele.iloc[:,[1,2,3]],
-                              left_on = "ID",
-                              right_on = "SV_Name")
-
-df_sv_anno = df_sv_anno.drop(columns = "Alternate_Allele")
-
-columns_range = list(range(1,(df_sv_anno.shape[1]-2)))
-columns_range.insert(0, (df_sv_anno.shape[1]-2))
-columns_range.insert(6, (df_sv_anno.shape[1]-1))
-
-df_sv_anno = df_sv_anno.iloc[:,columns_range]
-df_sv_anno = df_sv_anno.rename(columns = {"SV_Name" : "SV Name",
-                                          "Sample_AF" : "SV Sample AF"})
+df_sv_anno = (DF_ANNO_FULL
+              .join(
+                  df_sv_allele.select(["SV_Name",
+                                       "Alternate_Allele", 
+                                       "Sample_AF"]),
+                                       left_on = "ID",
+                                       right_on = "SV_Name",
+                                       how = "inner")
+              .drop("Alternate_Allele")
+              .select(["ID",
+                       *DF_ANNO_FULL.columns[1:6],
+                       "Sample_AF",
+                       *DF_ANNO_FULL.columns[6:]])
+              .rename({"ID": "SV Name",
+                       "Sample_AF": "SV Sample AF"}))
 
 
 ## Creation of SV table for easier access of data required - join the dataframes based on SV names
-df_sv_join = DF_LD.merge(df_anno,
-                         on = "SV_Name",
-                         how = "left")
-
-df_sv_join = df_sv_join[["Chromosome",
-                         "SV_Name",
-                         "SV_Start",
-                         "SV_End",
-                         "SNP_Name",
-                         "SNP_Position",
-                         "R2",
-                         "D'"]]
-
-
-## Merging SV allele information with the LD dataset
-df_sv_join = df_sv_join.merge(df_sv_allele,
-                              on = ["Chromosome",
-                                    "SV_Name"],
-                              how = "left")
-
-df_sv_join = df_sv_join.rename(columns = {"Alternate_Allele" : "SV_Type",
-                                          "Sample_AF" : "SV_AF"})
-
-df_sv_join.loc[df_sv_join["SV_Type"] == "<DEL>", "SV_Type"] = "Deletion"
-df_sv_join.loc[df_sv_join["SV_Type"] == "<INS>", "SV_Type"] = "Insertion"
-df_sv_join.loc[df_sv_join["SV_Type"] == "<DUP>", "SV_Type"] = "Duplication"
-df_sv_join.loc[df_sv_join["SV_Type"] == "<INV>", "SV_Type"] = "Inversion"
-
-df_sv_join = df_sv_join.iloc[:, [0,1,2,3,8,9,4,5,6,7]]
+df_sv_join = (DF_LD
+              .join(df_anno, 
+                    on = "SV_Name", 
+                    how = "left")
+              .select(["Chromosome", 
+                       "SV_Name", 
+                       "SV_Start", 
+                       "SV_End",
+                       "SNP_Name", 
+                       "SNP_Position", 
+                       "R2", 
+                       "D'"])
+              .join(df_sv_allele, 
+                    on = ["Chromosome", 
+                          "SV_Name"], 
+                    how="left")
+              .rename({"Alternate_Allele": "SV_Type",
+                       "Sample_AF": "SV_AF"})
+              .with_columns([pl.when(pl.col("SV_Type") == "<DEL>").then("Deletion")
+                               .when(pl.col("SV_Type") == "<INS>").then("Insertion")
+                               .when(pl.col("SV_Type") == "<DUP>").then("Duplication")
+                               .when(pl.col("SV_Type") == "<INV>").then("Inversion")
+                               .otherwise(pl.col("SV_Type"))
+                               .alias("SV_Type")])
+              .select(["Chromosome", 
+                       "SV_Name", 
+                       "SV_Start", 
+                       "SV_End",
+                       "SV_Type", 
+                       "SV_AF", 
+                       "SNP_Name", 
+                       "SNP_Position", 
+                       "R2", 
+                       "D'"]))
 
 
 ## Merging SNP allele information with the LD dataset
-df_sv_snp_join = df_sv_join.merge(df_snp_allele,
-                                  on = ["Chromosome",
-                                        "SNP_Name",
-                                        "SNP_Position"],
-                                        how = "left")
-
-df_sv_snp_join = df_sv_snp_join.drop("SNP_Name", axis = 1)
-
-df_sv_snp_join = df_sv_snp_join.iloc[:, [0,1,2,3,4,5,13,6,9,10,11,12,7,8]]
-
-df_sv_snp_join = df_sv_snp_join.rename(columns = {"dbSNP" : "SNP_Name_dbSNP"})
-
+df_sv_snp_join = (
+    df_sv_join
+    .join(
+        df_snp_allele, 
+        on=["Chromosome", "SNP_Name", "SNP_Position"], 
+        how="left"
+    )
+    .drop("SNP_Name")
+    .with_columns(
+        pl.col("SNP_Position").cast(pl.Int32))
+    .select([
+        "Chromosome", "SV_Name", "SV_Start", "SV_End", "SV_Type", "SV_AF",
+        "dbSNP", "SNP_Position", 
+        "Reference_Allele", "Alternate_Allele", "Sample_AF", "gnomAD_nfe_AF", "R2", "D'"
+    ])  # Reorder columns
+    .rename({"dbSNP": "SNP_Name_dbSNP"})  # Rename column
+)
 
 
 ## Creation of a full dataframe to make data extraction much easier
-df_full_join = df_sv_snp_join.merge(df_gwas,
-                                    how = "left",
-                                    on = ["Chromosome",
-                                          "SNP_Position"])
-
-# Remove rows where SV AF is NA - these are SVs with AF < 0.1
-df_full_join = df_full_join[df_full_join["SV_AF"].notna()]
-
-# Change p-values to log10 scale
-    # Smallest pval was 1-e323. After looking at the distribution, all pvalues under 1e-50 were changed to 1e-50.
-df_full_join.loc[df_full_join["P-Value"] < 1e-50, "P-Value"] = 1e-50
-
-df_full_join["P-Value_log10"] = np.log10(df_full_join["P-Value"])
-df_full_join["P-Value_log10"] = -df_full_join["P-Value_log10"]
+df_full_join = (df_sv_snp_join
+                .join(df_gwas, 
+                      on = ["Chromosome", 
+                            "SNP_Position"], 
+                      how = "left")
+                .filter(pl.col("SV_AF").is_not_null())
+                .with_columns(pl.when(pl.col("P-Value") < 1e-50)
+                                .then(1e-50)
+                                .otherwise(pl.col("P-Value"))
+                                .alias("P-Value"))
+                .with_columns((-pl.col("P-Value")
+                                  .log10())
+                                  .alias("P-Value_log10")))
 
 
 # Subset df_anno for the SVs in df_full_foin
-sv_names = df_full_join["SV_Name"].unique()
-df_anno_subset = df_anno[df_anno["SV_Name"].isin(sv_names)]
+sv_names = df_full_join.select("SV_Name").unique()
+df_anno_subset = df_anno.filter(pl.col("SV_Name")
+                                  .is_in(sv_names["SV_Name"]))
 
 
 ## Creation of phenotype dictionary to encompass SV for each gene - computationally faster when creating SV table
-dict_pheno = {}
+df_phenotype = (
+    df_full_join
+    .groupby("Phenotype")
+    .agg(pl.col("SV_Name").unique())  # Ensure SV_Name is unique within each group
+)
 
-df_dict = df_full_join[["SV_Name", "SV_Start", "SV_End", "Phenotype"]]
-df_dict = df_dict.to_dict("records")
-
-for row in df_dict:
-    if row["Phenotype"] not in dict_pheno:
-        dict_pheno[row["Phenotype"]] = []
-        dict_pheno[row["Phenotype"]].append(row["SV_Name"])
-    else:
-        dict_pheno[row["Phenotype"]].append(row["SV_Name"])
-
-for k, v in dict_pheno.items():
-    dict_pheno[k] = set(v)
+dict_pheno = {
+    row[0]: set(row[1]) for row in df_phenotype.iter_rows()
+}
 
 
 ## Creation of y-coordinates to prevent overlap in genes when plotted
-def assign_y_coordinates(df = df_gene,
-                         y_start = -0.3,
-                         y_increment = 0.5,
-                         col_name = "y_coord"):
+def assign_y_coordinates(df: pl.DataFrame,
+                         y_start: float = -0.3,
+                         y_increment: float = 0.5,
+                         col_name: str = "y_coord") -> pl.DataFrame:
+    
     # Priority queue to keep track of the end positions of genes for each y-coordinate
-    df = df[df["feature"] == "transcript"]
-    df = df.sort_values(by = ["chr", "start"])
-    df = df.reset_index(drop = True) #reset index 
+    df_filtered = (df.filter(pl.col("feature") == "transcript")
+                     .sort(["chr", "start"]))
+    
+    rows = df_filtered.iter_rows()
+    
      # Dictionary to store priority queues for each chromosome
     chromosome_heaps = {}
 
     # List to store the y-coordinate for each gene annotation
-    y_coordinates = [y_start] * len(df)
+    y_coordinates = []
 
-    for index, row in df.iterrows():
-        chrom = row['chr']
+    for row in rows:
+        chrom, start, end = row[0], row[1], row[2]
 
-        # If the chromosome is not in the dictionary, initialize its heap
+        # Initialize heap for new chromosomes
         if chrom not in chromosome_heaps:
             chromosome_heaps[chrom] = []
 
-        # Work with the heap for the current chromosome
         heap = chromosome_heaps[chrom]
 
-        # If there's an available y-coordinate whose gene ends before the current gene starts,
-        # reuse that y-coordinate and update its gene end position
-        if heap and heap[0][0] <= row['start']:
-            previous_gene_end, y_coordinate = heapq.heappop(heap)
-            heapq.heappush(heap, (row['end'], y_coordinate))
+        # Check for available y-coordinates (no overlap)
+        if heap and heap[0][0] <= start:
+            _, y_coord = heapq.heappop(heap)
+            heapq.heappush(heap, (end, y_coord))
         else:
-            # If no y-coordinate is available, create a new one
-            if heap:
-                y_coordinate = min(y_coordinate for _, y_coordinate in heap) - y_increment
-            else:
-                y_coordinate = y_start
-            heapq.heappush(heap, (row['end'], y_coordinate))
+            # Create a new y-coordinate if none available
+            y_coord = heap[0][1] - y_increment if heap else y_start
+            heapq.heappush(heap, (end, y_coord))
 
-        # Assign the y-coordinate to the gene annotation
-        y_coordinates[index] = y_coordinate
+        y_coordinates.append(y_coord)
 
-    # Add the y-coordinates to the dataframe
-    df[col_name] = y_coordinates
+    # Add the y-coordinates as a new column
+    return df_filtered.with_columns(pl.Series(col_name, y_coordinates))
 
-    return df
 
 df_transcript = assign_y_coordinates(df = df_gene,
                                      y_start = -0.3,
@@ -336,7 +307,6 @@ df_transcript = assign_y_coordinates(df = df_transcript,
                                      y_start = -6.25,
                                      y_increment = 4,
                                      col_name = "y_coord_pheno")
-
 
 
 # Add icon for help popup
@@ -359,7 +329,6 @@ CHR_DD = dcc.Dropdown(id = 'chromosome-dropdown',
                       options = [{"label" : str(i),
                                   "value" : str(i)} for i in chromosomes])
 
-
 EMPTY_SPACE_REGION = html.Div(id = 'empty-space-region')
 
 RANGE_START_TB = dcc.Input(id = 'range-start-textbox',
@@ -376,7 +345,6 @@ RANGE_END_TB = dcc.Input(id = 'range-end-textbox',
                          debounce = True,
                          className = 'class-range')
 
-
 REGION_DIV = html.Div(id = 'chromosome-dropdown-div',
                       children = [REGION_LABEL,
                                   CHR_DD,
@@ -385,9 +353,6 @@ REGION_DIV = html.Div(id = 'chromosome-dropdown-div',
                                   RANGE_END_TB],
                       className = 'class-filter')
 
-
-# Make dropdown box for phenotypes
-# PHENO_LINE = html.Div(id = 'pheno-line-div')
 
 PHENO_LABEL = html.Div([html.P(["Phenotype",
                                 question_icon],
@@ -400,7 +365,11 @@ PHENO_LABEL = html.Div([html.P(["Phenotype",
                                              "hide" : 50},
                                     id = 'pheno-label-tooltip')])
 
-phenotypes = sorted(list(df_full_join["Phenotype"].unique()))
+
+phenotypes = sorted(df_full_join.select("Phenotype")
+                                .unique()
+                                .to_series()
+                                .to_list())
 phenotypes.insert(0, "Any")
 
 PHENO_DD = dcc.Dropdown(id = 'phenotype-dropdown',
@@ -432,7 +401,6 @@ GENE_DD_DIV = html.Div(id = 'gene-dropdown-div',
                        className = 'class-filter')
 
 
-
 # Create a tab section for filter between gene and genomic region
 TABS_FILTER_DIV = html.Div([dbc.Tabs([dbc.Tab(children = [GENE_DD_DIV],
                                          label = "by Gene",
@@ -443,7 +411,6 @@ TABS_FILTER_DIV = html.Div([dbc.Tabs([dbc.Tab(children = [GENE_DD_DIV],
                                      id = "tab-filters",
                                      active_tab = "tab-gene")],
                            className = 'class-section-filter-div')
-
 
 FILTER_DIV = html.Div(id = 'filter-div',
                       children = [TABS_FILTER_DIV,
@@ -464,58 +431,50 @@ def make_table(chrom = chromosomes,
 
     # Filter by chromosome
     if isinstance(chrom, list):
-        sv_list_chr = list(df_anno_subset["SV_Name"])
+        sv_list_chr = df_anno_subset["SV_Name"].to_list()
     else:
-        chrom = str("chr" + chrom)
-        sv_list_chr = df_anno_subset[(df_anno_subset["Chromosome"] == chrom)]
-        sv_list_chr = list(sv_list_chr["SV_Name"])
-
+        chrom = f"chr{chrom}"
+        sv_list_chr = df_anno_subset.filter(pl.col("Chromosome") == chrom)["SV_Name"].to_list()
 
     # Filter by range
-    sv_list_range = df_anno_subset[(df_anno_subset["SV_Start"] >= range_start) & \
-                                   (df_anno_subset["SV_End"] <= range_end)]
-
-    sv_list_range = list(sv_list_range["SV_Name"])
-
+    sv_list_range = df_anno_subset.filter((pl.col("SV_Start") >= range_start) & \
+                                          (pl.col("SV_End") <= range_end))["SV_Name"].to_list()
 
     # Filter by phenotype
     if isinstance(pheno, list):
-        sv_list_pheno = list(df_anno_subset["SV_Name"])
+        sv_list_pheno = df_anno_subset["SV_Name"].to_list()
     else:
         sv_list_pheno = dict_pheno[pheno]
-
 
     # Filter by gene
     if isinstance(gene, list):
         sv_list_gene = list(df_anno_subset["SV_Name"])
     else:
-        df_1gene = df_gene[(df_gene["feature"] == "transcript") & \
-                           (df_gene["gene"] == gene)]
+        df_1gene = df_gene.filter((pl.col("feature") == "transcript") & \
+                                  (pl.col("gene") == gene))
         start = df_1gene["start"].min()
         end = df_1gene["end"].max()
-        chrom = df_1gene.iat[0,0]
-        strand = df_1gene.iat[0,3]
-
-        sv_list_gene = df_sv_anno[(df_sv_anno["Chromosome"] == chrom) & \
-                                  (df_sv_anno["Start"] >= (start - 100000)) & \
-                                  (df_sv_anno["End"] <= (end + 100000))]
-
-        sv_list_gene = list(sv_list_gene["SV Name"])
-
+        chrom = df_1gene.select("chr").to_series()[0]
+        
+        sv_list_gene = df_sv_anno.filter((pl.col("Chromosome") == chrom) & \
+                                         (pl.col("Start") >= (start - 100000)) & \
+                                         (pl.col("End") <= (end + 100000)))["SV Name"].to_list()
 
     # Find overlaps sv's from all lists
     sv_list_complete = set(sv_list_pheno).intersection(sv_list_chr, sv_list_gene, sv_list_range)
 
-    tab_show = df_sv_anno[df_sv_anno["SV Name"].isin(sv_list_complete)]
-    tab_show = tab_show[["SV Name", "Chromosome", "Start", "End", "Type", "Length", "SV Sample AF"]]
-    tab_show = tab_show.rename(columns = {"SV Name" : "ID",
-                                          "Chromosome" : "Chrom",
-                                          "Length" : "Size (bp)",
-                                          "SV Sample AF" : "AF"})
+    tab_show = df_sv_anno.filter(pl.col("SV Name").is_in(sv_list_complete)).select([
+        pl.col("SV Name").alias("ID"),
+        pl.col("Chromosome").alias("Chrom"),
+        pl.col("Start"),
+        pl.col("End"),
+        pl.col("Type"),
+        pl.col("Length").alias("Size (bp)"),
+        pl.col("SV Sample AF").alias("AF")])
 
     return dash_table.DataTable(id ='strvar-table',
-                                data = tab_show.to_dict("records"),
-                                columns = [{'id': c, 'name': c} for c in tab_show.loc[:,[ "Chrom", "Start", "End", "Type", "Size (bp)", "AF"]]],
+                                data = tab_show.to_dicts(),
+                                columns = [{'id': c, 'name': c} for c in ["Chrom", "Start", "End", "Type", "Size (bp)", "AF"]],
                                 page_size = 100,
                                 fixed_rows = {'headers': True},
                                 style_table = {'height': '400px',
@@ -530,13 +489,12 @@ def make_table(chrom = chromosomes,
                                 selected_rows = [])
 
 
-
 # Make SV annotation table
 def make_annotation_table(sv = "None"):
     if sv == "None":
-        df_anno_subset_sv = pd.DataFrame()
+        df_anno_subset_sv = pl.DataFrame()
         return dash_table.DataTable(id ='anno-table',
-                                    data = df_anno_subset_sv.to_dict("records"),
+                                    data = [],
                                     columns = [{'id': c, 'name': c} for c in df_anno_subset_sv.columns],
                                     page_size = 400,
                                     fixed_rows = {'headers': True},
@@ -549,12 +507,13 @@ def make_annotation_table(sv = "None"):
                                                     'fontWeight': 'bold'})
 
     else:
-        df_anno_subset_sv = df_sv_anno[df_sv_anno["SV Name"] == sv]
-        df_anno_subset_sv = df_anno_subset_sv.transpose()
-        df_anno_subset_sv = df_anno_subset_sv.rename_axis(" ").reset_index()
-        df_anno_subset_sv.columns = ["Header", "Information"]
+        df_anno_subset_sv = df_sv_anno.filter(pl.col("SV Name") == sv)
+        df_anno_subset_sv = (df_anno_subset_sv.melt()
+                                              .rename({"variable": "Header",
+                                                       "value": "Information"}))
+        
         return dash_table.DataTable(id ='anno-table',
-                                    data = df_anno_subset_sv.to_dict("records"),
+                                    data = df_anno_subset_sv.to_dicts(),
                                     columns = [{'id': c, 'name': c} for c in df_anno_subset_sv.columns],
                                     page_size = 400,
                                     fixed_rows = {'headers': True},
@@ -574,7 +533,6 @@ def make_annotation_table(sv = "None"):
                                                               'height' : 'auto'}],
                                     style_header = {'display' : 'none',
                                                     'height' : '0px'})
-
 
 
 DTABLE = html.Div(id = 'strvar-table-div',
@@ -599,7 +557,6 @@ DTABLE_HEADER = html.Div([html.H4(["SV Information",
 
 DTABLE_TEXTBOX = html.Div(id = 'dtable-textbox')
 
-
 DTABLE_DIV = html.Div(id = 'dtable-div',
                       children = [DTABLE_HEADER,
                                   DTABLE,
@@ -619,7 +576,6 @@ SV_TABLE_BUTTON = dbc.Button("SV Annotations",
                              outline = True,
                              size = "sm",
                              n_clicks = 0)
-
 
 # Create the filter division
 ALL_FILTER_DIV = html.Div(id = 'all-filter-div',
@@ -673,16 +629,16 @@ def make_plot(sv = "None",
     global tab, sv_start_plot, sv_end_plot, extra_points, extra_points_pheno
 
     if sv == "None":
-        tab = pd.DataFrame(columns = ["SNP Position",
-                                      "-log10(P-Value)"])
-        sc_plot = px.scatter(data_frame = tab,
-                             x = "SNP Position",
+        tab = pl.DataFrame({"SNP_Position": [],
+                            "-log10(P-Value)": []})
+        
+        sc_plot = px.scatter(data_frame = tab.to_pandas(),
+                             x = "SNP_Position",
                              y = "-log10(P-Value)",
                              labels = {"-log10(P-Value)" : "-log<sub>10</sub> (P-Value)",
-                                       "SNP Position" : "Position in hg38 (bp)"},
+                                       "SNP_Position" : "Position in hg38 (bp)"},
                              width = 850,
                              height = 650,
-                            #  marginal_x = "rug",
                              template = "ggplot2")
 
         sc_plot.update_layout(margin = dict(l = 20, r = 20, t = 50, b = 50),
@@ -690,38 +646,34 @@ def make_plot(sv = "None",
                               font_family = "Nunito Sans",
                               font_size = 20)
     else:
-        tab = df_full_join[df_full_join["SV_Name"] == sv]
+        tab = df_full_join.filter(pl.col("SV_Name") == sv)
 
         # Display +/- 1KB from SV position
-        sv_start = df_anno_subset[df_anno_subset["SV_Name"] == sv]["SV_Start"].values[0]
-        sv_end = df_anno_subset[df_anno_subset["SV_Name"] == sv]["SV_End"].values[0]
+        sv_start = df_anno_subset.filter(pl.col("SV_Name") == sv).select("SV_Start").to_numpy()[0, 0]
+        sv_end = df_anno_subset.filter(pl.col("SV_Name") == sv).select("SV_End").to_numpy()[0, 0]
 
         sv_start_plot = sv_start - 1000
         sv_end_plot = sv_end + 1000
 
 
         if pheno == "None":
-            tab_lab = tab.to_dict("records")
+            tab_lab = tab.to_dicts()
 
             def tab_label_maker(row):
 
-                label_pheno = row["Phenotype"]
-                label_snp_name = row["SNP_Name_dbSNP"]
-                label_chr = row["Chromosome"]
-                label_snp_pos = row["SNP_Position"]
-                label_pval = row["P-Value"]
-                label_r2 = row["R2"]
-                label_d = row["D'"]
-                label_svname = row["SV_Name"]
-                label_svstart = row["SV_Start"]
-                label_svend = row["SV_End"]
-                label_svtype = row["SV_Type"]
+                return [row["Phenotype"],
+                        row["SNP_Name_dbSNP"],
+                        row["Chromosome"],
+                        row["SNP_Position"],
+                        row["P-Value"],
+                        row["R2"],
+                        row["D'"],
+                        row["SV_Name"],
+                        row["SV_Start"],
+                        row["SV_End"],
+                        row["SV_Type"]]
 
-                label = [label_pheno, label_snp_name, label_chr, label_snp_pos, label_pval, label_r2, label_d, label_svname, label_svstart, label_svend, label_svtype]
-
-                return label
-
-            sc_plot = px.scatter(data_frame = tab,
+            sc_plot = px.scatter(data_frame = tab.to_pandas(),
                                  x = "SNP_Position",
                                  y = linkage_value,
                                  labels = {"SNP_Position" : "Position in hg38 (bp)",
@@ -734,7 +686,13 @@ def make_plot(sv = "None",
             sc_plot.update_traces(marker = dict(color = "rgba(57,201,187,0.5)",
                                                 line = dict(color = "rgba(57,201,187,1)"),
                                                 size = 10),
-                                  hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + '<br>SNP Name: %{customdata[1]}' + '<br>Chromosome: %{customdata[2]}' + '<br>SNP Position: %{customdata[3]}' + '<br>P-Value: %{customdata[4]}' + '<br>r2: %{customdata[5]}' + "<br>D': %{customdata[6]}",
+                                  hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + 
+                                                  '<br>SNP Name: %{customdata[1]}' + 
+                                                  '<br>Chromosome: %{customdata[2]}' + 
+                                                  '<br>SNP Position: %{customdata[3]}' + 
+                                                  '<br>P-Value: %{customdata[4]}' + 
+                                                  '<br>r2: %{customdata[5]}' + 
+                                                  "<br>D': %{customdata[6]}",
                                   customdata = [tab_label_maker(row) for row in tab_lab])
 
             sc_plot.update_xaxes(showspikes = True,
@@ -748,8 +706,8 @@ def make_plot(sv = "None",
                                 #   yaxis_range = [-0.6, 1])
 
              # Extract min and max SNP positions in chosen SV
-            min_SNP = min(tab["SNP_Position"]) - 100000
-            max_SNP = max(tab["SNP_Position"]) + 100000
+            min_SNP = tab.select("SNP_Position").min().item() - 100000
+            max_SNP = tab.select("SNP_Position").max().item() + 100000
 
             if sv_start < min_SNP:
                 min_SNP = sv_start - 100000
@@ -758,12 +716,12 @@ def make_plot(sv = "None",
                 max_SNP = sv_end  + 100000
 
             else:
-                min_SNP = min(tab["SNP_Position"]) - 100000
-                max_SNP = max(tab["SNP_Position"]) + 100000
+                min_SNP = tab.select("SNP_Position").min()[0, 0] - 100000
+                max_SNP = tab.select("SNP_Position").max()[0, 0] + 100000
 
 
-            chromo = list(set(tab["Chromosome"]))[0]
-            svname = list(set(tab["SV_Name"]))[0]
+            chromo = tab.select("Chromosome").unique().item()
+            svname = tab.select("SV_Name").unique().item()
 
 
             sc_plot.add_shape(type = "rect",
@@ -789,152 +747,156 @@ def make_plot(sv = "None",
                                                        color = "lightsalmon"),
                                          showlegend = False,
                                          name = svname,
-                                         hovertemplate = '<br><b>SV Name:</b> %{customdata[7]}<br>' + '<br>Chromosome: %{customdata[2]}' + '<br>Start: %{customdata[8]}' + '<br>End: %{customdata[9]}' + '<br>Type: %{customdata[10]}',
+                                         hovertemplate = '<br><b>SV Name:</b> %{customdata[7]}<br>' + 
+                                                         '<br>Chromosome: %{customdata[2]}' + 
+                                                         '<br>Start: %{customdata[8]}' + 
+                                                         '<br>End: %{customdata[9]}' + 
+                                                         '<br>Type: %{customdata[10]}',
                                          customdata = [tab_label_maker(tab_lab[0])]))
 
             # Add extra points from df_sv with R2 and D' values
-            extra_points = df_sv_snp_join[df_sv_snp_join["SV_Name"] == sv]
+            extra_points = df_sv_snp_join.filter(pl.col("SV_Name") == sv)
 
-            extra_points = extra_points[~extra_points["SNP_Name_dbSNP"].isin(tab["SNP_Name_dbSNP"])]
+            extra_points = extra_points.filter(~pl.col("SNP_Name_dbSNP").is_in(tab.select("SNP_Name_dbSNP").to_series()))
 
              # Create a list of labels for hovertext
-            df_lab = extra_points.to_dict("records")
+            df_lab = extra_points.to_dicts()
 
             def extra_label_maker(row):
 
-                label_snp_name = row["SNP_Name_dbSNP"]
-                label_chr = row["Chromosome"]
-                label_snp_pos = row["SNP_Position"]
-                label_r2 = row["R2"]
-                label_d = row["D'"]
+                return [row["SNP_Name_dbSNP"],
+                        row["Chromosome"],
+                        row["SNP_Position"],
+                        row["R2"],
+                        row["D'"]]
 
-                label = [label_snp_name, label_chr, label_snp_pos, label_r2, label_d]
-
-                return label
-
-            sc_plot.add_trace(go.Scattergl(x = extra_points["SNP_Position"],
-                                           y = extra_points[linkage_value],
+            sc_plot.add_trace(go.Scattergl(x = extra_points.select("SNP_Position").to_series().to_list(),
+                                           y = extra_points.select(linkage_value).to_series().to_list(),
                                            mode = "markers",
                                            marker = dict(size = 10,
                                                          color = "rgba(168,168,168,0.5)",
                                                          line = dict(color = "rgba(168,168,168,1)")),
-                                           hovertemplate = '<br><b>SNP Name: %{customdata[0]}</b>' +'<br>Chromosome: %{customdata[1]}' + '<br>SNP Position: %{customdata[2]}' + '<br>r2: %{customdata[3]}' + "<br>D': %{customdata[4]}",
+                                           hovertemplate = '<br><b>SNP Name: %{customdata[0]}</b>' +
+                                                           '<br>Chromosome: %{customdata[1]}' + 
+                                                           '<br>SNP Position: %{customdata[2]}' + 
+                                                           '<br>r2: %{customdata[3]}' + 
+                                                           "<br>D': %{customdata[4]}",
                                            customdata = [extra_label_maker(row) for row in df_lab],
                                            showlegend = False,
                                            name = "Not in \nGWAS Catalog"))
 
-            # Use min and max SNP positions to extract required rows from df_exons to obtain gene information
-            exons = df_gene[(df_gene["chr"] == chromo) & \
-                            (df_gene["start"] >= min_SNP) & \
-                            (df_gene["end"] <= max_SNP)]
+            # Filter exons and group them for gene-level information
+            exons = df_gene.filter((pl.col("chr") == chromo) &
+                                   (pl.col("start") >= min_SNP) &
+                                   (pl.col("end") <= max_SNP))
 
-            exons_genes = exons.groupby(["chr", "gene", "strand"])["start"].min()
-            exons_genes = exons_genes.to_frame().reset_index()
+            # Group to get gene-level start and end positions
+            exons_genes = (exons.groupby(["chr", "gene", "strand"])
+                                .agg([pl.col("start").min().alias("start"),
+                                      pl.col("end").max().alias("end")]))
 
-            exons_end = exons.groupby(["chr", "gene", "strand"])["end"].max()
-            exons_end = exons_end.to_frame().reset_index()
+            # Filter for exons only
+            exons_exons = exons.filter(pl.col("feature") == "exon")
 
-            exons_genes["end"] = exons_end["end"]
+            # Join to add y-coordinates (gene_line_position) to both dataframes
+            exons_genes = exons_genes.join(df_transcript.select(["gene", "y_coord_nopheno"]),
+                                           on = "gene",
+                                           how = "left").rename({"y_coord_nopheno": "gene_line_position"})
 
-            # gene_line_position = -0.3
+            exons_exons = exons_exons.join(df_transcript.select(["gene", "y_coord_nopheno"]),
+                                           on = "gene",
+                                           how = "left").rename({"y_coord_nopheno": "gene_line_position"})
 
-            for i in range(0,len(exons_genes)):
-                row = exons_genes.loc[exons_genes.index[i]]
-                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_nopheno"].values[0]) 
+            # Prepare shapes for exons (rectangles)
+            shapes = []
+            for row in exons_exons.iter_rows(named=True):
+                shapes.append(
+                    dict(type = "rect",
+                         x0 = row["start"],
+                         x1 = row["end"],
+                         y0 = row["gene_line_position"] + 0.02,
+                         y1 = row["gene_line_position"] - 0.02,
+                         line = dict(color = "mediumseagreen", 
+                                     width = 2),
+                         fillcolor = "mediumseagreen"))
 
-                sc_plot.add_shape(type = "line",
-                                x0 = (row["start"]),
-                                x1 = (row["end"]),
-                                y0 = gene_line_position,
-                                y1 = gene_line_position,
-                                line_width = 3,
-                                line_color = "darkslategrey")
+            # Prepare shapes and annotations for genes (lines and text)
+            annotations = []
+            for row in exons_genes.iter_rows(named = True):
+                # Line shape for the gene
+                shapes.append(dict(type = "line",
+                                   x0 = row["start"],
+                                   x1 = row["end"],
+                                   y0 = row["gene_line_position"],
+                                   y1 = row["gene_line_position"],
+                                   line = dict(width = 3, 
+                                               color = "darkslategrey")))
 
+                # Compute annotation details
                 text_anno_x = round((row["end"] - row["start"]) / 2) + row["start"]
+                direction = "\u2192" if row["strand"] == "+" else "\u2190"
+                hover_text = f"{row['gene']}<br><b>Gene direction:</b> {'forward' if row['strand'] == '+' else 'reverse'}"
 
-                if row["strand"] == "+":
-                    sc_plot.add_annotation(x = text_anno_x,
-                                           y = gene_line_position + 0.060,
-                                           text = row["gene"] + '<span style="font-size:15px">\u2192</span>',
-                                           font = dict(size = 10),
-                                           hovertext = row["gene"] + '<br><b>Gene direction:</b> forward',
-                                           name = "Gene",
-                                           showarrow = False)
+                # Add annotation
+                annotations.append(dict(x = text_anno_x,
+                                        y = row["gene_line_position"] + 0.060,
+                                        text = f"{row['gene']}<span style='font-size:15px'>{direction}</span>",
+                                        font = dict(size = 10),
+                                        hovertext = hover_text,showarrow = False))
 
-                else:
-                    sc_plot.add_annotation(x = text_anno_x,
-                                           y = gene_line_position + 0.060,
-                                           text = row["gene"] + '<span style="font-size:15px">\u2190</span>',
-                                           font = dict(size = 10),
-                                           hovertext = row["gene"] + '<br><b>Gene direction:</b> reverse',
-                                           name = "Gene",
-                                           showarrow = False)
-
-
-            exons_exons = exons[exons["feature"] == "exon"]
-
-            for i in range(0,len(exons_exons)):
-                row = exons_exons.loc[exons_exons.index[i]]
-                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_nopheno"].values[0]) 
-                sc_plot.add_shape(type = "rect",
-                                x0 = (row["start"]),
-                                x1 = (row["end"]),
-                                y0 = gene_line_position + 0.020,
-                                y1 = gene_line_position - 0.020,
-                                line = dict(color = "mediumseagreen",
-                                            width = 2),
-                                fillcolor = "mediumseagreen")
-
+            # Add all shapes and annotations to the plot in bulk - computational time severely reduced
+            sc_plot.update_layout(shapes = shapes)
+            sc_plot.update_layout(annotations = annotations)
+ 
 
         else:
-            tab = tab[tab["Phenotype"] == pheno]
+            tab = tab.filter(pl.col("Phenotype") == pheno)
 
-            tab_lab = tab.to_dict("records")
+            tab_lab = tab.to_dicts()
 
             def tab_label_maker(row):
 
-                label_pheno = row["Phenotype"]
-                label_snp_name = row["SNP_Name_dbSNP"]
-                label_chr = row["Chromosome"]
-                label_snp_pos = row["SNP_Position"]
-                label_pval = row["P-Value"]
-                label_r2 = row["R2"]
-                label_d = row["D'"]
-                label_svname = row["SV_Name"]
-                label_svstart = row["SV_Start"]
-                label_svend = row["SV_End"]
-                label_svtype = row["SV_Type"]
+                return [row["Phenotype"],
+                        row["SNP_Name_dbSNP"],
+                        row["Chromosome"],
+                        row["SNP_Position"],
+                        row["P-Value"],
+                        row["R2"],
+                        row["D'"],
+                        row["SV_Name"],
+                        row["SV_Start"],
+                        row["SV_End"],
+                        row["SV_Type"]]
 
-                label = [label_pheno, label_snp_name, label_chr, label_snp_pos, label_pval, label_r2, label_d, label_svname, label_svstart, label_svend, label_svtype]
-
-                return label
-
-            sc_plot = px.scatter(data_frame = tab,
+            sc_plot = px.scatter(data_frame = tab.to_pandas(),
                                  x = "SNP_Position",
                                  y = "P-Value_log10",
                                  labels = {"SNP_Position" : "Position in hg38 (bp)",
                                            "P-Value_log10" : "-log<sub>10</sub> (P-Value)",
                                            linkage_value : legend_title},
                                  color = linkage_value,
-                                #  color_continuous_scale = px.colors.sequential.Viridis_r,
-                                color_continuous_scale = [(0, "#4643CE"),
-                                                        (0.2, "#4643CE"),
-                                                        (0.2, "#90CAEE"),
-                                                        (0.4, "#90CAEE"),
-                                                        (0.4, "#46E17C"),
-                                                        (0.6, "#46E17C"),
-                                                        (0.6, "#EEC06B"),
-                                                        (0.8, "#EEC06B"),
-                                                        (0.8, "#CE5C5C"),
-                                                        (1, "#CE5C5C")],
+                                 color_continuous_scale = [(0, "#4643CE"),
+                                                           (0.2, "#4643CE"),
+                                                           (0.2, "#90CAEE"),
+                                                           (0.4, "#90CAEE"),
+                                                           (0.4, "#46E17C"),
+                                                           (0.6, "#46E17C"),
+                                                           (0.6, "#EEC06B"),
+                                                           (0.8, "#EEC06B"),
+                                                           (0.8, "#CE5C5C"),
+                                                           (1, "#CE5C5C")],
                                  range_color = [0, 1],
-                                #  size = size_value,
                                  width = 850,
                                  height = 650,
-                                #  marginal_x = "rug",
                                  template = "ggplot2")
 
-            sc_plot.update_traces(hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + '<br>SNP Name: %{customdata[1]}' + '<br>Chromosome: %{customdata[2]}' + '<br>SNP Position: %{customdata[3]}' + '<br>P-Value: %{customdata[4]}' + '<br>r2: %{customdata[5]}' + "<br>D': %{customdata[6]}",
+            sc_plot.update_traces(hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + 
+                                                  '<br>SNP Name: %{customdata[1]}' + 
+                                                  '<br>Chromosome: %{customdata[2]}' + 
+                                                  '<br>SNP Position: %{customdata[3]}' + 
+                                                  '<br>P-Value: %{customdata[4]}' + 
+                                                  '<br>r2: %{customdata[5]}' + 
+                                                  "<br>D': %{customdata[6]}",
                                   customdata = [tab_label_maker(row) for row in tab_lab],
                                   marker = dict(size = 10))
 
@@ -945,17 +907,15 @@ def make_plot(sv = "None",
                                  autosize = True,
                                  font_family = "Nunito Sans",
                                  font_size = 20,
-                                #  xaxis_range = [sv_start_plot, sv_end_plot],
-                                #  yaxis_range = [-20, 50],
                                  coloraxis_colorbar = dict(lenmode = "pixels",
                                                            len = 150,
                                                            yanchor = "top",
                                                            y = 1,
                                                            dtick = 0.2))
 
-             # Extract min and max SNP positions in chosen SV
-            min_SNP = min(tab["SNP_Position"]) - 100000
-            max_SNP = max(tab["SNP_Position"]) + 100000
+            # Extract min and max SNP positions in chosen SV
+            min_SNP = tab.select("SNP_Position").min().item() - 100000
+            max_SNP = tab.select("SNP_Position").max().item() + 100000
 
             if sv_start < min_SNP:
                 min_SNP = sv_start - 100000
@@ -964,88 +924,89 @@ def make_plot(sv = "None",
                 max_SNP = sv_end  + 100000
 
             else:
-                min_SNP = min(tab["SNP_Position"]) - 100000
-                max_SNP = max(tab["SNP_Position"]) + 100000
+                min_SNP = tab.select("SNP_Position").min()[0, 0] - 100000
+                max_SNP = tab.select("SNP_Position").max()[0, 0] + 100000
 
 
-            chromo = list(set(tab["Chromosome"]))[0]
-            svname = list(set(tab["SV_Name"]))[0]
+            chromo = tab.select("Chromosome").unique().item()
+            svname = tab.select("SV_Name").unique().item()
 
             # Add points from gwas for pheno, without r2 and D' values
-            extra_points = df_gwas[(df_gwas["Chromosome"] == chromo) & \
-                                   (df_gwas["SNP_Position"] >= min_SNP) & \
-                                   (df_gwas["SNP_Position"] <= max_SNP) & \
-                                   (df_gwas["Phenotype"] == pheno)]
+            extra_points = (df_gwas.filter((pl.col("Chromosome") == chromo) &
+                                           (pl.col("SNP_Position") >= min_SNP) &
+                                           (pl.col("SNP_Position") <= max_SNP) &
+                                           (pl.col("Phenotype") == pheno))
+                                   .filter(~pl.col("SNP_Name_GWAS").is_in(tab.select("SNP_Name_GWAS").to_series())))
 
-            extra_points = extra_points[~extra_points["SNP_Name_GWAS"].isin(tab["SNP_Name_GWAS"])]
-
-            extra_points.loc[extra_points["P-Value"] < 1e-50, "P-Value"] = 1e-50
-
-            extra_points["P-Value_log10"] = np.log10(extra_points["P-Value"])
-            extra_points["P-Value_log10"] = -extra_points["P-Value_log10"]
+            extra_points = (extra_points.with_columns(pl.when(pl.col("P-Value") < 1e-50)
+                                                        .then(1e-50)
+                                                        .otherwise(pl.col("P-Value"))
+                                                        .alias("P-Value"),
+                                                        (-pl.col("P-Value").log10()).alias("P-Value_log10")))
 
             # Create a list of labels for hovertext
-            df_lab = extra_points.to_dict("records")
+            df_lab = extra_points.to_dicts()
 
             def label_maker(row):
 
-                label_pheno = row["Phenotype"]
-                label_snp_name = row["SNP_Name_GWAS"]
-                label_chr = row["Chromosome"]
-                label_snp_pos = row["SNP_Position"]
-                label_pval = row["P-Value"]
-
-                label = [label_pheno, label_snp_name, label_chr, label_snp_pos, label_pval]
-
-                return label
+                return [row["Phenotype"],
+                        row["SNP_Name_GWAS"],
+                        row["Chromosome"],
+                        row["SNP_Position"],
+                        row["P-Value"]]
 
 
-            sc_plot.add_trace(go.Scattergl(x = extra_points["SNP_Position"],
-                                           y = extra_points["P-Value_log10"],
+            sc_plot.add_trace(go.Scattergl(x = extra_points.select("SNP_Position").to_series().to_list(),
+                                           y = extra_points.select("P-Value_log10").to_series().to_list(),
                                            mode = "markers",
                                            marker = dict(size = 10,
                                                          color = "rgba(168,168,168,0.5)",
                                                          line = dict(color = "rgba(168,168,168,1)")),
-                                           hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + '<br>SNP Name: %{customdata[1]}' + '<br>Chromosome: %{customdata[2]}' + '<br>SNP Position: %{customdata[3]}' + '<br>P-Value: %{customdata[4]}',
+                                           hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + 
+                                                           '<br>SNP Name: %{customdata[1]}' + 
+                                                           '<br>Chromosome: %{customdata[2]}' + 
+                                                           '<br>SNP Position: %{customdata[3]}' + 
+                                                           '<br>P-Value: %{customdata[4]}',
                                            customdata = [label_maker(row) for row in df_lab],
                                            showlegend = False,
                                            name = "No LD Data"))
 
             # Add points from other phenos in LD with SV
             if toggle_pheno == True:
-                extra_points_pheno = df_full_join[(df_full_join["Chromosome"] == chromo) & \
-                                                  (df_full_join["SNP_Position"] >= min_SNP) & \
-                                                  (df_full_join["SNP_Position"] <= max_SNP) & \
-                                                  (df_full_join["SV_Name"] == sv)]
-
-                extra_points_pheno = extra_points_pheno[~extra_points_pheno["SNP_Name_GWAS"].isin(tab["SNP_Name_GWAS"])]
+                extra_points_pheno = (df_full_join.filter((pl.col("Chromosome") == chromo) &
+                                                          (pl.col("SNP_Position") >= min_SNP) &
+                                                          (pl.col("SNP_Position") <= max_SNP) &
+                                                          (pl.col("SV_Name") == sv))
+                                                  .filter(~pl.col("SNP_Name_GWAS").is_in(tab.select("SNP_Name_GWAS").to_series())))
 
 
                 # Create a list of labels for hovertext
-                df_lab_2 = extra_points_pheno.to_dict("records")
+                df_lab_2 = extra_points_pheno.to_dicts()
 
                 def label_maker(row):
 
-                    label_pheno = row["Phenotype"]
-                    label_snp_name = row["SNP_Name_GWAS"]
-                    label_chr = row["Chromosome"]
-                    label_snp_pos = row["SNP_Position"]
-                    label_pval = row["P-Value"]
-                    label_r2 = row["R2"]
-                    label_d = row["D'"]
-
-                    label = [label_pheno, label_snp_name, label_chr, label_snp_pos, label_pval, label_r2, label_d]
-
-                    return label
+                    return [row["Phenotype"],
+                            row["SNP_Name_GWAS"],
+                            row["Chromosome"],
+                            row["SNP_Position"],
+                            row["P-Value"],
+                            row["R2"],
+                            row["D'"]]
 
 
-                sc_plot.add_trace(go.Scattergl(x = extra_points_pheno["SNP_Position"],
-                                               y = extra_points_pheno["P-Value_log10"],
+                sc_plot.add_trace(go.Scattergl(x = extra_points_pheno.select("SNP_Position").to_series().to_list(),
+                                               y = extra_points_pheno.select("P-Value_log10").to_series().to_list(),
                                                mode = "markers",
                                                marker = dict(size = 10,
                                                              color = "rgba(168,168,168,0.5)",
                                                              line = dict(color = "rgba(168,168,168,1)")),
-                                               hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + '<br>SNP Name: %{customdata[1]}' + '<br>Chromosome: %{customdata[2]}' + '<br>SNP Position: %{customdata[3]}' + '<br>P-Value: %{customdata[4]}' + '<br>r2: %{customdata[5]}' + "<br>D': %{customdata[6]}",
+                                               hovertemplate = '<br><b>Phenotype:</b> %{customdata[0]}<br>' + 
+                                                               '<br>SNP Name: %{customdata[1]}' + 
+                                                               '<br>Chromosome: %{customdata[2]}' + 
+                                                               '<br>SNP Position: %{customdata[3]}' + 
+                                                               '<br>P-Value: %{customdata[4]}' + 
+                                                               '<br>r2: %{customdata[5]}' + 
+                                                               "<br>D': %{customdata[6]}",
                                                customdata = [label_maker(row) for row in df_lab_2],
                                                showlegend = False,
                                                name = "Other Phenotypes"))
@@ -1076,96 +1037,77 @@ def make_plot(sv = "None",
                                                        color = "lightsalmon"),
                                          showlegend = False,
                                          name = svname,
-                                         hovertemplate = '<br><b>SV Name:</b> %{customdata[7]}<br>' + '<br>Chromosome: %{customdata[2]}' + '<br>Start: %{customdata[8]}' + '<br>End: %{customdata[9]}' + '<br>Type: %{customdata[10]}',
+                                         hovertemplate = '<br><b>SV Name:</b> %{customdata[7]}<br>' + 
+                                                         '<br>Chromosome: %{customdata[2]}' + 
+                                                         '<br>Start: %{customdata[8]}' + 
+                                                         '<br>End: %{customdata[9]}' + 
+                                                         '<br>Type: %{customdata[10]}',
                                          customdata = [tab_label_maker(tab_lab[0])]))
+            
+            # Filter exons and group them for gene-level information
+            exons = df_gene.filter((pl.col("chr") == chromo) &
+                                   (pl.col("start") >= min_SNP) &
+                                   (pl.col("end") <= max_SNP))
 
-            # Use min and max SNP positions to extract required rows from df_exons to obtain gene information
-            exons = df_gene[(df_gene["chr"] == chromo) & \
-                            (df_gene["start"] >= min_SNP) & \
-                            (df_gene["end"] <= max_SNP)]
+            # Group to get gene-level start and end positions
+            exons_genes = (exons.groupby(["chr", "gene", "strand"])
+                                .agg([pl.col("start").min().alias("start"),
+                                      pl.col("end").max().alias("end")]))
 
-            exons_genes = exons.groupby(["chr", "gene", "strand"])["start"].min()
-            exons_genes = exons_genes.to_frame().reset_index()
+            # Filter for exons only
+            exons_exons = exons.filter(pl.col("feature") == "exon")
 
-            exons_end = exons.groupby(["chr", "gene", "strand"])["end"].max()
-            exons_end = exons_end.to_frame().reset_index()
+            # Join to add y-coordinates (gene_line_position) to both dataframes
+            exons_genes = exons_genes.join(df_transcript.select(["gene", "y_coord_pheno"]),
+                                           on = "gene",
+                                           how = "left").rename({"y_coord_pheno": "gene_line_position"})
 
-            exons_genes["end"] = exons_end["end"]
+            exons_exons = exons_exons.join(df_transcript.select(["gene", "y_coord_pheno"]),
+                                           on = "gene",
+                                           how = "left").rename({"y_coord_pheno": "gene_line_position"})
 
-            # gene_line_position = -6.25
+            # Prepare shapes for exons (rectangles)
+            shapes = []
+            for row in exons_exons.iter_rows(named=True):
+                shapes.append(
+                    dict(type = "rect",
+                         x0 = row["start"],
+                         x1 = row["end"],
+                         y0 = row["gene_line_position"] + 0.75,
+                         y1 = row["gene_line_position"] - 0.75,
+                         line = dict(color = "mediumseagreen", 
+                                     width = 2),
+                         fillcolor = "mediumseagreen"))
 
-            for i in range(0,len(exons_genes)):
-                row = exons_genes.loc[exons_genes.index[i]]
-                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_pheno"].values[0])  
-                sc_plot.add_shape(type = "line",
-                                x0 = (row["start"]),
-                                x1 = (row["end"]),
-                                y0 = gene_line_position,
-                                y1 = gene_line_position,
-                                line_width = 3,
-                                line_color = "darkslategrey")
+            # Prepare shapes and annotations for genes (lines and text)
+            annotations = []
+            for row in exons_genes.iter_rows(named = True):
+                # Line shape for the gene
+                shapes.append(dict(type = "line",
+                                   x0 = row["start"],
+                                   x1 = row["end"],
+                                   y0 = row["gene_line_position"],
+                                   y1 = row["gene_line_position"],
+                                   line = dict(width = 3, 
+                                               color = "darkslategrey")))
 
+                # Compute annotation details
                 text_anno_x = round((row["end"] - row["start"]) / 2) + row["start"]
+                direction = "\u2192" if row["strand"] == "+" else "\u2190"
+                hover_text = f"{row['gene']}<br><b>Gene direction:</b> {'forward' if row['strand'] == '+' else 'reverse'}"
 
-                if row["strand"] == "+":
-                    # sc_plot.add_trace(go.Scatter(x = np.array([text_anno_x]),
-                    #                             y = np.array([gene_line_position - 2.25]),
-                    #                             mode = "markers+lines",
-                    #                             marker = dict(symbol = "triangle-right-open",
-                    #                                         size = 12,
-                    #                                         color = "darkslategrey"),
-                    #                             showlegend = False,
-                    #                             hovertemplate = row["gene"] + '<br><b>Gene direction:</b> forward',
-                    #                             name = "gene direction"))
+                # Add annotation
+                annotations.append(dict(x = text_anno_x,
+                                        y = row["gene_line_position"] + 1.75,
+                                        text = f"{row['gene']}<span style='font-size:15px'>{direction}</span>",
+                                        font = dict(size = 10),
+                                        hovertext = hover_text,showarrow = False))
 
-                    sc_plot.add_annotation(x = text_anno_x,
-                                           y = gene_line_position + 1.75,
-                                           text = row["gene"] + '<span style="font-size:15px">\u2192</span>',
-                                           font = dict(size = 10),
-                                           hovertext = row["gene"] + '<br><b>Gene direction:</b> forward',
-                                           name = "Gene",
-                                           showarrow = False)
-
-                else:
-                    # sc_plot.add_trace(go.Scatter(x = np.array([text_anno_x]),
-                    #                             y = np.array([gene_line_position - 1.25]),
-                    #                             mode = "markers+lines",
-                    #                             marker = dict(symbol = "triangle-left-open",
-                    #                                         size = 12,
-                    #                                         color = "darkslategrey"),
-                    #                             showlegend = False,
-                    #                             hovertemplate = row["gene"] + '<br><b>Gene direction:</b> reverse',
-                    #                             name = "gene direction"))
-
-                    sc_plot.add_annotation(x = text_anno_x,
-                                           y = gene_line_position + 1.75,
-                                           text = row["gene"] + '<span style="font-size:15px">\u2190</span>',
-                                           font = dict(size = 10),
-                                           hovertext = row["gene"] + '<br><b>Gene direction:</b> reverse',
-                                           name = "Gene",
-                                           showarrow = False)
-
-
-            exons_exons = exons[exons["feature"] == "exon"]
-
-            for i in range(0,len(exons_exons)):
-                row = exons_exons.loc[exons_exons.index[i]]
-                gene_line_position = float(df_transcript.loc[df_transcript["gene"] == row["gene"], "y_coord_pheno"].values[0]) 
-                sc_plot.add_shape(type = "rect",
-                                x0 = (row["start"]),
-                                x1 = (row["end"]),
-                                y0 = gene_line_position + 0.75,
-                                y1 = gene_line_position - 0.75,
-                                line = dict(color = "mediumseagreen",
-                                            width = 2),
-                                fillcolor = "mediumseagreen")
-
+            # Add all shapes and annotations to the plot in bulk - computational time severely reduced
+            sc_plot.update_layout(shapes = shapes)
+            sc_plot.update_layout(annotations = annotations)
 
     return sc_plot
-
-
-# SCATPLOT = dcc.Graph(id = "scatter-plot",
-#                      figure = make_plot())
 
 SCATPLOT = dcc.Loading(id = "plot-loading",
                        children = [dcc.Graph(id = "scatter-plot",
@@ -1221,21 +1163,19 @@ TOGGLE_SWITCH = html.Div([dbc.Row([dbc.Col(["D'"],
                                    id = 'download-region')])
 
 
-
 SCATPLOT_DIV = html.Div(id = 'scatter-plot-div',
                         children = [SCATPLOT,
                                     TOGGLE_SWITCH],
                         className = 'sections')
 
 
-
 # Make SNP table from GWAS data based on clickData from plot
 def make_SNP_table(snp = "None"):
     if snp == "None":
-        df_snp = pd.DataFrame()
+        df_snp = pl.DataFrame()
         return dash_table.DataTable(id ='snp-table',
-                                    data = df_snp.to_dict("records"),
-                                    columns = [{'id': c, 'name': c} for c in df_snp.columns],
+                                    data = [],
+                                    columns = [],
                                     page_size = 400,
                                     fixed_rows = {'headers': True},
                                     style_table = {'height': '500px', 'overflowY': 'auto'},
@@ -1246,51 +1186,39 @@ def make_SNP_table(snp = "None"):
                                                     'fontWeight': 'bold'})
 
     else:
-        df_snp = df_full_join[(df_full_join["SNP_Name_dbSNP"] == snp) | (df_full_join["SNP_Name_GWAS"] == snp)]
-
-        df_snp.loc[:, "Link"] = "[" + df_snp["Pubmed_ID"] + "]" + "(https://" + df_snp["Link"] + ")"
-
-        df_snp.loc[:, "SNP_Name_dbSNP"] = "[" + df_snp["SNP_Name_dbSNP"] + "]" + "(https://www.ncbi.nlm.nih.gov/snp/" + df_snp["SNP_Name_dbSNP"] + ")"
-
-        df_snp.loc[:, "SNP_Name_GWAS"] = "[" + df_snp["SNP_Name_GWAS"] + "]" + "(https://www.ebi.ac.uk/gwas/variants/" + df_snp["SNP_Name_GWAS"] + ")"
-
-        df_snp = df_snp[["Chromosome",
-                         "SNP_Position",
-                         "SNP_Name_dbSNP",
-                         "SNP_Name_GWAS",
-                         "Reference_Allele",
-                         "Alternate_Allele",
-                         "Risk_Allele",
-                         "Risk_Allele_Frequency",
-                         "Sample_AF",
-                         "gnomAD_nfe_AF",
-                         "Phenotype",
-                         "P-Value",
-                         "Study",
-                         "Link"]]
-        df_snp = df_snp.rename(columns = {"Link" : "Pubmed Link",
-                                          "Chromosome" : "Chrom",
-                                          "SNP_Position" : "SNP Position",
-                                          "SNP_Name_dbSNP" : "SNP Name: dbSNP",
-                                          "SNP_Name_GWAS" : "SNP Name: GWAS",
-                                          "Risk_Allele" : "Risk Allele",
-                                          "Risk_Allele_Frequency" : "Risk AF",
-                                          "Reference_Allele" : "Reference Allele",
-                                          "Alternate_Allele" : "Alternate Allele",
-                                          "Sample_AF" : "Sample AF",
-                                          "gnomAD_nfe_AF" : "gnomAD NFE AF"})
-
-        df_snp = df_snp.drop_duplicates()
+        df_snp = (df_full_join.filter((pl.col("SNP_Name_dbSNP") == snp) | (pl.col("SNP_Name_GWAS") == snp))
+                              .with_columns([
+                pl.format("[{}](https://{})", pl.col("Pubmed_ID"), pl.col("Link")).alias("Link"),
+                pl.format("[{}](https://www.ncbi.nlm.nih.gov/snp/{})", pl.col("SNP_Name_dbSNP"), pl.col("SNP_Name_dbSNP")).alias("SNP_Name_dbSNP"),
+                pl.format("[{}](https://www.ebi.ac.uk/gwas/variants/{})", pl.col("SNP_Name_GWAS"), pl.col("SNP_Name_GWAS")).alias("SNP_Name_GWAS")])
+                              .select([
+                pl.col("Chromosome").alias("Chrom"),
+                pl.col("SNP_Position").alias("SNP Position"),
+                pl.col("SNP_Name_dbSNP").alias("SNP Name: dbSNP"),
+                pl.col("SNP_Name_GWAS").alias("SNP Name: GWAS"),
+                pl.col("Reference_Allele").alias("Reference Allele"),
+                pl.col("Alternate_Allele").alias("Alternate Allele"),
+                pl.col("Risk_Allele").alias("Risk Allele"),
+                pl.col("Risk_Allele_Frequency").alias("Risk AF"),
+                pl.col("Sample_AF").alias("Sample AF"),
+                pl.col("gnomAD_nfe_AF").alias("gnomAD NFE AF"),
+                pl.col("Phenotype"),
+                pl.col("P-Value"),
+                pl.col("Study"),
+                pl.col("Link").alias("Pubmed Link")])
+                               .unique())
 
         return dash_table.DataTable(id ='snp-table',
-                                    data = df_snp.to_dict("records"),
-                                    columns = [{'id': c, 'name': c, 'presentation': 'markdown'} if (c == "Pubmed Link" or c == "SNP Name: dbSNP" or c == "SNP Name: GWAS") else ({'id': c, 'name': c, 'type':'numeric', 'format': {'specifier': '.3f'}} if (c == "Risk AF" or c == "Sample AF" or c == "gnomAD NFE AF") else {'id': c, 'name': c}) for c in df_snp.columns],
+                                    data = df_snp.to_dicts(),
+                                    columns = [{'id': c, 'name': c, 'presentation': 'markdown'} 
+                                               if (c == "Pubmed Link" or c == "SNP Name: dbSNP" or c == "SNP Name: GWAS") 
+                                               else ({'id': c, 'name': c, 'type':'numeric', 'format': {'specifier': '.3f'}} 
+                                                     if (c == "Risk AF" or c == "Sample AF" or c == "gnomAD NFE AF") 
+                                                     else {'id': c, 'name': c}) for c in df_snp.columns],
                                     markdown_options = {"html" : True,
                                                         "link_target": "_blank"},
                                     page_size = 400,
                                     fixed_rows = {'headers': True},
-                                    # fixed_columns = {'headers' : True,
-                                    #                  'data' : 4},
                                     style_table = {'height': '500px',
                                                    'minWidth': '100%',
                                                    'width' : '100%',
@@ -1329,7 +1257,6 @@ def make_SNP_table(snp = "None"):
                                                     'whiteSpace' : 'normal',
                                                     'height' : 'auto'})
 
-
 SNP_TABLE = html.Div([html.Div(id = 'snp-table-div',
                                children = [make_SNP_table()],
                                className = 'sections'),
@@ -1337,9 +1264,6 @@ SNP_TABLE = html.Div([html.Div(id = 'snp-table-div',
                                  dbc.ModalBody("SNP table populated below.")],
                                  id = 'modal-snp-table',
                                  is_open = False)])
-
-
-
 
 
 #### HEADERS ####
@@ -1425,16 +1349,6 @@ DISCLAIMER_DIV = html.Div(id = 'disclaimer-div',
                           children = [DISCLAIMER_BUTTON,
                                       DISCLAIMER_COLLAPSE])
 
-# DOCUMENTATION = dcc.Markdown('''
-# Documentation for GWAS SVatalog can be found [here](https://gwas-svatalog-docs.readthedocs.io/en/latest/index.html).
-# Colocalization testing of GWAS loci across various datasets can be conducted at [LocusFocus] (https://locusfocus.research.sickkids.ca/).
-# ''',
-#                              id = 'doc-markdown')
-
-# DISC_DOC_DIV = html.Div(id = 'disc-doc-div',
-#                         children = [DOCUMENTATION,
-#                                     DISCLAIMER_DIV])
-
 GSV_LOGO_DIV = html.Div(id = 'gsv-logo-image-div',
                         children = [GSV_LOGO])
 
@@ -1447,9 +1361,7 @@ LOGO_DIV = html.Div(id = 'logo-image-div',
                     children = [GSV_LOGO_DIV,
                                 COMP_LOGO_DIV])
 
-
 HEADER_DIV = html.Div(id = 'header-line-div')
-
 
 # Header for filters
 FILTER_HEADER = html.H3("Search for Structural Variants",
@@ -1484,8 +1396,6 @@ PLOT_HEADER_DIV = html.Div(id = 'plot-header-div',
                            className = 'section-headers')
 
 
-
-
 #### CALLBACKS ####
 
 # Incorporate together to create interactive webpage
@@ -1498,7 +1408,6 @@ app.layout = html.Div([NAVBAR,
                        PLOT_HEADER_DIV,
                        SCATPLOT_DIV,
                        SNP_TABLE])
-
 
 # Contact Us modal
 @app.callback(
@@ -1551,14 +1460,13 @@ def update_gene_dropdown(chrom):
         new_genes = genes
         new_pheno = phenotypes
     else:
-        chromosome = str("chr" + str(chrom))
-        new_genes = df_gene[df_gene["chr"] == chromosome]
-        new_genes = sorted(list(new_genes["gene"]))
-        new_pheno = df_full_join[df_full_join["Chromosome"] == chromosome]
-        new_pheno = sorted(list(new_pheno["Phenotype"].unique().astype(str)))
+        chromosome = f"chr{chrom}"
+        new_genes = df_gene.filter(pl.col("chr") == chromosome).select("gene").unique().to_series().to_list()
+        new_genes = sorted(new_genes)
+        new_pheno = df_full_join.filter(pl.col("Chromosome") == chromosome).select("Phenotype").unique().to_series().to_list()
+        new_pheno = sorted(map(str, new_pheno))
 
     return [{'label': str(i), 'value': str(i)} for i in new_genes], [{'label': str(i), 'value': str(i)} for i in new_pheno]
-
 
 
 # Filters alter the table displayed
@@ -1596,6 +1504,7 @@ def update_table(chrom, pheno, gene, range_start, range_end):
 
     return new_df
 
+
 @app.callback(
     Output('dtable-textbox', 'children'),
     Input('strvar-table', 'derived_virtual_data'),
@@ -1621,7 +1530,6 @@ def update_sv_textbox(data, selected_rows, range_start, range_end):
         return html.P("")
 
 
-
 @app.callback(
     Output('anno-table-div', 'children'),
     Input('strvar-table', 'selected_rows')
@@ -1629,17 +1537,13 @@ def update_sv_textbox(data, selected_rows, range_start, range_end):
 def update_anno_table(selected_rows):
 
     if selected_rows:
-        # sv_selected = tab_show.iloc[selected_rows[0],[0]][0]
-        row_label = tab_show.index[selected_rows[0]]
-        col_label = tab_show.columns[0]
-        sv_selected = tab_show.loc[row_label, col_label]
+        sv_selected = tab_show[selected_rows[0], 0]
         new_anno_table = make_annotation_table(sv = sv_selected)
 
     else:
         new_anno_table = make_annotation_table(sv = "None")
 
     return new_anno_table
-
 
 
 # Collapse SV annotation table
@@ -1652,7 +1556,6 @@ def toggle_collapse(n, is_open):
     if n:
         return not is_open
     return is_open
-
 
 
 # Only row selection on table changes plot, SV div textbox and button enabling
@@ -1673,10 +1576,7 @@ def update_plot(selected_rows, pheno, toggle, toggle_pheno):
     toggle_pheno = False if toggle_pheno is None else toggle_pheno
 
     if selected_rows:
-        # sv_name = tab_show.iloc[selected_rows[0],[0]][0]
-        row_label = tab_show.index[selected_rows[0]]
-        col_label = tab_show.columns[0]
-        sv_name = tab_show.loc[row_label, col_label]
+        sv_name = tab_show[selected_rows[0], 0]
         button = False
 
     else:
@@ -1697,14 +1597,14 @@ def update_plot(selected_rows, pheno, toggle, toggle_pheno):
     return new_plot, {}, button, pheno_toggle_disable
 
 
-
 # Update SNP table based on data point clicked on plot
 @app.callback(
         Output('snp-table-div', 'children'),
         Output('modal-snp-table', 'is_open'),
         Input('scatter-plot', 'clickData'),
         Input('strvar-table', 'selected_rows'),
-        State('modal-snp-table', 'is_open')
+        State('modal-snp-table', 'is_open'),
+    prevent_initial_call = True
 )
 def update_SNP_table(clickData, selected_rows, is_open):
 
@@ -1729,7 +1629,6 @@ def update_SNP_table(clickData, selected_rows, is_open):
     return new_snp_table, is_open
 
 
-
 # Download SNP data seen in plot
 @app.callback(
     Output('download-csv', 'data'),
@@ -1749,131 +1648,162 @@ def download_plot_data(n_clicks, relayoutData, toggle, toggle_pheno):
         linkage = "R2"
     else:
         linkage = "D'"
+        
+    # Function to concat all dfs using polars
+    def align_and_reorder_columns(dfs, reference_df):
+    
+        reference_columns = reference_df.columns
+        reference_schema = reference_df.schema
 
+        aligned_dfs = []
+        for df in dfs:
+            missing_columns = [col for col in reference_columns if col not in df.columns]
+            df_with_all_columns = df.with_columns([pl.lit(None, dtype = reference_schema[col]).alias(col)
+                                                   for col in missing_columns])
+            
+            df_with_all_columns = df_with_all_columns.select(['Chromosome',
+                                                                'SV_Name',
+                                                                'SV_Start',
+                                                                'SV_End',
+                                                                'SV_Type',
+                                                                'SV_AF',
+                                                                'SNP_Name_GWAS',
+                                                                'SNP_Name_dbSNP',
+                                                                'SNP_Position',
+                                                                'Reference_Allele',
+                                                                'Alternate_Allele',
+                                                                'Sample_AF',
+                                                                'gnomAD_nfe_AF',
+                                                                'Risk_Allele',
+                                                                'Risk_Allele_Frequency',
+                                                                "D'",
+                                                                'R2',
+                                                                'Phenotype',
+                                                                'P-Value',
+                                                                'P-Value_log10',
+                                                                'Pubmed_ID',
+                                                                'Study',
+                                                                'Link'])
+            aligned_dfs.append(df_with_all_columns)
 
+        concatenated_df = pl.concat(aligned_dfs)
+
+        return concatenated_df
+
+        
     # If button was triggered
     if ctx.triggered[0]['prop_id'] == 'download-button.n_clicks':
-
-        if (relayoutData == None or "xaxis.autorange" in relayoutData):
-            # This means the plot is in the default starting position
+        # Default range (no zoom)
+        if relayoutData is None or "xaxis.autorange" in relayoutData:
             df_download = tab
             df_extra = extra_points
 
-            if toggle_pheno == True:
+            if toggle_pheno:
                 df_extra_pheno = extra_points_pheno
-                df_download = pd.concat([df_download, df_extra, df_extra_pheno])
-            elif toggle_pheno == False:
-                df_download = pd.concat([df_download, df_extra])
+                df_download = align_and_reorder_columns([df_download, df_extra, df_extra_pheno], 
+                                                        reference_df = df_download)
             else:
-                df_download = pd.concat([df_download, df_extra])
+                df_download = align_and_reorder_columns([df_download, df_extra], 
+                                                        reference_df = df_download)
 
-
+        # Filter by x-axis and y-axis ranges
         elif "xaxis.range[0]" in relayoutData:
+            x_min, x_max = relayoutData["xaxis.range[0]"], relayoutData["xaxis.range[1]"]
 
             if "yaxis.range[0]" in relayoutData:
+                y_min, y_max = relayoutData["yaxis.range[0]"], relayoutData["yaxis.range[1]"]
 
-                if "P-Value" in extra_points.columns:
-                    df_download = tab[(tab["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                      (tab["SNP_Position"] <= relayoutData["xaxis.range[1]"]) & \
-                                      (tab["P-Value_log10"] >= relayoutData["yaxis.range[0]"]) & \
-                                      (tab["P-Value_log10"] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                            (extra_points["SNP_Position"] <= relayoutData["xaxis.range[1]"]) &
-                                            (extra_points["P-Value_log10"] >= relayoutData["yaxis.range[0]"]) & \
-                                            (extra_points["P-Value_log10"] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra_pheno = extra_points_pheno[(extra_points_pheno["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                                        (extra_points_pheno["SNP_Position"] <= relayoutData["xaxis.range[1]"]) &
-                                                        (extra_points_pheno["P-Value_log10"] >= relayoutData["yaxis.range[0]"]) & \
-                                                        (extra_points_pheno["P-Value_log10"] <= relayoutData["yaxis.range[1]"])]
-
+                if toggle_pheno:
+                    df_download = tab.filter((pl.col("SNP_Position") >= x_min) &
+                                             (pl.col("SNP_Position") <= x_max) &
+                                             (pl.col("P-Value_log10") >= y_min) &
+                                             (pl.col("P-Value_log10") <= y_max))
+                    
+                    df_extra = extra_points.filter((pl.col("SNP_Position") >= x_min) &
+                                                   (pl.col("SNP_Position") <= x_max) &
+                                                   (pl.col("P-Value_log10") >= y_min) &
+                                                   (pl.col("P-Value_log10") <= y_max))
+                    
+                    df_extra_pheno = extra_points_pheno.filter((pl.col("SNP_Position") >= x_min) &
+                                                               (pl.col("SNP_Position") <= x_max) &
+                                                               (pl.col("P-Value_log10") >= y_min) &
+                                                               (pl.col("P-Value_log10") <= y_max))
                 else:
-                    df_download = tab[(tab["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                      (tab["SNP_Position"] <= relayoutData["xaxis.range[1]"]) & \
-                                      (tab[linkage] >= relayoutData["yaxis.range[0]"]) & \
-                                      (tab[linkage] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                            (extra_points["SNP_Position"] <= relayoutData["xaxis.range[1]"]) &
-                                            (extra_points[linkage] >= relayoutData["yaxis.range[0]"]) & \
-                                            (extra_points[linkage] <= relayoutData["yaxis.range[1]"])]
-
-            else:
-
-                if toggle_pheno == True:
-
-                    df_download = tab[(tab["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                      (tab["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                            (extra_points["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_extra_pheno = extra_points_pheno[(extra_points_pheno["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                                        (extra_points_pheno["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_download = pd.concat([df_download, df_extra, df_extra_pheno])
-
-                elif toggle_pheno == False:
-
-                    df_download = tab[(tab["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                      (tab["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                            (extra_points["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_download = pd.concat([df_download, df_extra])
-
+                    
+                    if "D'" in extra_points.columns:
+                        df_download = tab.filter((pl.col("SNP_Position") >= x_min) &
+                                                (pl.col("SNP_Position") <= x_max) &
+                                                (pl.col(linkage) >= y_min) &
+                                                (pl.col(linkage) <= y_max))
+                        
+                        df_extra = extra_points.filter((pl.col("SNP_Position") >= x_min) &
+                                                    (pl.col("SNP_Position") <= x_max) &
+                                                    (pl.col(linkage) >= y_min) &
+                                                    (pl.col(linkage) <= y_max))
+                    
+                    else:
+                        df_download = tab.filter((pl.col("SNP_Position") >= x_min) &
+                                                (pl.col("SNP_Position") <= x_max) &
+                                                (pl.col("P-Value_log10") >= y_min) &
+                                                (pl.col("P-Value_log10") <= y_max))
+                        
+                        df_extra = extra_points.filter((pl.col("SNP_Position") >= x_min) &
+                                                    (pl.col("SNP_Position") <= x_max) &
+                                                    (pl.col("P-Value_log10") >= y_min) &
+                                                    (pl.col("P-Value_log10") <= y_max))
+                    
+            else:  # Only x-axis range
+                df_download = tab.filter((pl.col("SNP_Position") >= x_min) &
+                                         (pl.col("SNP_Position") <= x_max))
+                
+                df_extra = extra_points.filter((pl.col("SNP_Position") >= x_min) &
+                                               (pl.col("SNP_Position") <= x_max))
+                
+                if toggle_pheno:
+                    df_extra_pheno = extra_points_pheno.filter((pl.col("SNP_Position") >= x_min) &
+                                                               (pl.col("SNP_Position") <= x_max))
+                    
+                    df_download = align_and_reorder_columns([df_download, df_extra, df_extra_pheno], 
+                                                             reference_df = df_download)
                 else:
-
-                    df_download = tab[(tab["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                      (tab["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points["SNP_Position"] >= relayoutData["xaxis.range[0]"]) & \
-                                            (extra_points["SNP_Position"] <= relayoutData["xaxis.range[1]"])]
-
-                    df_download = pd.concat([df_download, df_extra])
-
-
-
-        else: # yaxis.range[0] only
-
-            if toggle_pheno == True:
-
-                    df_download = tab[(tab["P-Value_log10"] >= relayoutData["yaxis.range[0]"]) & \
-                                      (tab["P-Value_log10"] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points["P-Value_log10"] >= relayoutData["yaxis.range[0]"]) & \
-                                            (extra_points["P-Value_log10"] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra_pheno = extra_points_pheno[(extra_points_pheno["P-Value_log10"] >= relayoutData["yaxis.range[0]"]) & \
-                                                        (extra_points_pheno["P-Value_log10"] <= relayoutData["yaxis.range[1]"])]
-
-                    df_download = pd.concat([df_download, df_extra, df_extra_pheno])
-
-            elif toggle_pheno == False:
-
-                    df_download = tab[(tab[linkage] >= relayoutData["yaxis.range[0]"]) & \
-                                      (tab[linkage] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points[linkage] >= relayoutData["yaxis.range[0]"]) & \
-                                            (extra_points[linkage] <= relayoutData["yaxis.range[1]"])]
-
-                    df_download = pd.concat([df_download, df_extra])
-
+                    df_download = align_and_reorder_columns([df_download, df_extra], 
+                                                             reference_df = df_download)
+        else:  # Only y-axis range
+            y_min, y_max = relayoutData["yaxis.range[0]"], relayoutData["yaxis.range[1]"]
+            
+            if toggle_pheno:
+                df_download = tab.filter((pl.col("P-Value_log10") >= y_min) &
+                                         (pl.col("P-Value_log10") <= y_max))
+            
+                df_extra = extra_points.filter((pl.col("P-Value_log10") >= y_min) &
+                                               (pl.col("P-Value_log10") <= y_max))
+                
+                df_extra_pheno = extra_points_pheno.filter((pl.col("P-Value_log10") >= y_min) &
+                                                           (pl.col("P-Value_log10") <= y_max))
+                
+                df_download = align_and_reorder_columns([df_download, df_extra, df_extra_pheno], 
+                                                         reference_df = df_download)
             else:
-
-                    df_download = tab[(tab[linkage] >= relayoutData["yaxis.range[0]"]) & \
-                                      (tab[linkage] <= relayoutData["yaxis.range[1]"])]
-
-                    df_extra = extra_points[(extra_points[linkage] >= relayoutData["yaxis.range[0]"]) & \
-                                            (extra_points[linkage] <= relayoutData["yaxis.range[1]"])]
-
-                    df_download = pd.concat([df_download, df_extra])
+                
+                if "D'" in extra_points.columns:
+                    df_download = tab.filter((pl.col(linkage) >= y_min) &
+                                                (pl.col(linkage) <= y_max))
+                
+                    df_extra = extra_points.filter((pl.col(linkage) >= y_min) &
+                                                    (pl.col(linkage) <= y_max))
+                else:
+                    df_download = tab.filter((pl.col("P-Value_log10") >= y_min) &
+                                             (pl.col("P-Value_log10") <= y_max))
+                
+                    df_extra = extra_points.filter((pl.col("P-Value_log10") >= y_min) &
+                                                   (pl.col("P-Value_log10") <= y_max))
+                
+                df_download = align_and_reorder_columns([df_download, df_extra], 
+                                                         reference_df = df_download)
             #raise PreventUpdate
 
-        return dcc.send_data_frame(df_download.to_csv, "gwas_svatalog_snp_data.csv")
-
+        return dcc.send_data_frame(df_download.to_pandas().to_csv, 
+                                   "gwas_svatalog_snp_data.csv")
 
 
 if __name__ == '__main__':
