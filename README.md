@@ -4,4 +4,4 @@
 
 The [GWAS SVatalog documentation](https://gwas-svatalog-docs.readthedocs.io/en/latest/index.html) provides details on how to use the tool.    
     
-*The app is currently being updated to fix the computational time in creating the interactive plot.
+    
