@@ -1,4 +1,6 @@
 from waitress import serve
-from app import server #"app" is the name of my Dash script I want to serve
+from app import server 
 
-serve(server)
+serve(server, 
+      listen = '127.0.0.1:1234', 
+      threads = 10)
