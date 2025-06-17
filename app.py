@@ -697,6 +697,13 @@ def make_plot(sv = "None",
 
             sc_plot.update_xaxes(showspikes = True,
                                  spikemode = "across")
+            
+            y_max = float(tab[linkage_value].max())
+            ticks = np.linspace(start = 0, 
+                                stop = y_max, 
+                                num = 5)
+            ticks = [round(t, 2) for t in ticks if t >= 0]
+            sc_plot.update_yaxes(tickvals = ticks)
 
             sc_plot.update_layout(margin = dict(l = 20, r = 20, t = 50, b = 50),
                                   autosize = False,
@@ -902,6 +909,13 @@ def make_plot(sv = "None",
 
             sc_plot.update_xaxes(showspikes = True,
                                  spikemode = "across")
+            
+            y_max = float(tab["P-Value_log10"].max())
+            ticks = np.linspace(start = 0, 
+                                stop = y_max, 
+                                num = 5)
+            ticks = [round(t, 0) for t in ticks if t >= 0]
+            sc_plot.update_yaxes(tickvals=ticks)
 
             sc_plot.update_layout(margin = dict(l = 20, r = 20, t = 50, b = 50),
                                  autosize = True,
