@@ -1333,12 +1333,15 @@ NAVBAR = dbc.NavbarSimple(id = 'navbar-lf',
                                                               class_name = 'navbar-items'),
                                                    dbc.Modal([dbc.ModalHeader(dbc.ModalTitle("Citation")),
                                                               dbc.ModalBody(dcc.Markdown('''
-                                                                                        **Chirmade, S., Wang, Z., Mastromatteo, S., Sanders, E., Thiruvahindrapuram, B., Nalpathamkalam, T., Pellecchia, G., et al.** (2025).  
-                                                                                        <a href="https://www.nature.com/articles/s41437-025-00809-2" target="_blank" style="color:#2ba089; text-decoration:none;">
-                                                                                        GWAS SVatalog: a visualization tool to aid fine-mapping of GWAS loci with structural variations.
-                                                                                        </a> <i>Heredity.</i>
-                                                                                        '''),
-                                                                            style={'whiteSpace': 'pre-wrap'})],
+                                                                                        <span children="Chirmade, S., Wang, Z., Mastromatteo, S., Sanders, E., Thiruvahindrapuram, B., Nalpathamkalam, T., Pellecchia, G., et al. (2025)." />
+                                                                                        <a href="https://www.nature.com/articles/s41437-025-00809-2"
+                                                                                        target="_blank"
+                                                                                        style="color:#2ba089; text-decoration:none;"
+                                                                                        children="GWAS SVatalog: a visualization tool to aid fine-mapping of GWAS loci with structural variations." />
+                                                                                        <i children="Heredity." />
+                                                                                                    ''',
+                                                                                        dangerously_allow_html = True,
+                                                                                        id = 'citation-mrkdwn'))],
                                                               id = 'modal-citation',
                                                               is_open = False)])])
 
@@ -1360,11 +1363,15 @@ DISCLAIMER_BUTTON = dbc.Button("Disclaimer",
                                id = 'disclaimer-button')
 
 DISCLAIMER_COLLAPSE = dbc.Collapse(dbc.Card(dbc.CardBody(dcc.Markdown('''
-                                                                    Database constructed from predominantly European population of 101 individuals with Cystic Fibrosis (CF).  
-                                                                    The alleles affected by CF aside, the remainder of the genome is comparable to a healthy population of European descent  
-                                                                    (<a href="https://www.nature.com/articles/s41437-025-00809-2" target="_blank" style="color:#2ba089; text-decoration:none;">Chirmade <i>et&nbsp;al.</i>, 2025</a>).  
-                                                                    Genomic location is referenced against GRCh38.
-                                                                    '''))),
+                                                                    <span children="Database constructed from predominantly European population of 101 individuals with Cystic Fibrosis (CF). The alleles affected by CF aside, the remainder of the genome is comparable to a healthy population of European descent " />
+                                                                    <a href="https://www.nature.com/articles/s41437-025-00809-2"
+                                                                    target="_blank"
+                                                                    style="color:#2ba089; text-decoration:none;"
+                                                                    children="(Chirmade et. al., 2025)" />
+                                                                    <span children=". Genomic location is referenced against GRCh38." />
+                                                                                ''',
+                                                                    dangerously_allow_html = True,
+                                                                    id = 'disclaimer-mrkdwn'))),
                                    id = 'disclaimer-collapse',
                                    is_open = False)
 
