@@ -1323,18 +1323,22 @@ NAVBAR = dbc.NavbarSimple(id = 'navbar-lf',
                                                                                         id = 'contact-us-mrkdwn'))],
                                                               id = 'modal-contact-us',
                                                               is_open = False)]),
-                                      dbc.NavItem(dbc.NavLink("Subscribe",
-                                                              href = "https://mailchi.mp/752ab1c4d516/locusfocus",
-                                                              target = "_blank",
-                                                              class_name = 'navbar-items')),
+                                    #   dbc.NavItem(dbc.NavLink("Subscribe",
+                                    #                           href = "https://mailchi.mp/752ab1c4d516/locusfocus",
+                                    #                           target = "_blank",
+                                    #                           class_name = 'navbar-items')),
                                       dbc.NavItem([dbc.Button("Citation",
                                                               id = 'button-modal-citation',
                                                               n_clicks = 0,
                                                               class_name = 'navbar-items'),
                                                    dbc.Modal([dbc.ModalHeader(dbc.ModalTitle("Citation")),
                                                               dbc.ModalBody(dcc.Markdown('''
-                                                                                         *to be published*
-                                                                                        '''))],
+                                                                                        **Chirmade, S., Wang, Z., Mastromatteo, S., Sanders, E., Thiruvahindrapuram, B., Nalpathamkalam, T., Pellecchia, G., et al.** (2025).  
+                                                                                        <a href="https://www.nature.com/articles/s41437-025-00809-2" target="_blank" style="color:#2ba089; text-decoration:none;">
+                                                                                        GWAS SVatalog: a visualization tool to aid fine-mapping of GWAS loci with structural variations.
+                                                                                        </a> <i>Heredity.</i>
+                                                                                        '''),
+                                                                            style={'whiteSpace': 'pre-wrap'})],
                                                               id = 'modal-citation',
                                                               is_open = False)])])
 
@@ -1355,7 +1359,12 @@ DISCLAIMER_BUTTON = dbc.Button("Disclaimer",
                                size = "sm",
                                id = 'disclaimer-button')
 
-DISCLAIMER_COLLAPSE = dbc.Collapse(dbc.Card(dbc.CardBody("Database constructed from predominantly European population of 101 individuals with Cystic Fibrosis (CF). The alleles affected by CF aside, the remainder of the genome is comparable to a healthy population of European descent (citation TBD). Genomic location is referenced against GRCh38.")),
+DISCLAIMER_COLLAPSE = dbc.Collapse(dbc.Card(dbc.CardBody(dcc.Markdown('''
+                                                                    Database constructed from predominantly European population of 101 individuals with Cystic Fibrosis (CF).  
+                                                                    The alleles affected by CF aside, the remainder of the genome is comparable to a healthy population of European descent  
+                                                                    (<a href="https://www.nature.com/articles/s41437-025-00809-2" target="_blank" style="color:#2ba089; text-decoration:none;">Chirmade <i>et&nbsp;al.</i>, 2025</a>).  
+                                                                    Genomic location is referenced against GRCh38.
+                                                                    '''))),
                                    id = 'disclaimer-collapse',
                                    is_open = False)
 
