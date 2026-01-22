@@ -4,4 +4,6 @@
 
 The [GWAS SVatalog documentation](https://gwas-svatalog-docs.readthedocs.io/en/latest/index.html) provides details on how to use the tool.    
     
-    
+Citation:    
+Chirmade, S., Wang, Z., Mastromatteo, S. et al. GWAS SVatalog: a visualization tool to aid fine-mapping of GWAS loci with structural variations. Heredity (2025).    
+https://doi.org/10.1038/s41437-025-00809-2
