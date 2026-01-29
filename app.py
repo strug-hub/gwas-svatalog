@@ -1350,11 +1350,6 @@ NAVBAR = dbc.NavbarSimple(id = 'navbar-lf',
 GSV_LOGO = html.Img(src = "assets/gwas-svatalog-name.png",
                     id = 'gsv-logo-image')
 
-TCAG_LOGO = html.Img(src = "assets/tcaglogo.png",
-                     id = 'tcag-logo-image')
-
-SK_LOGO = html.Img(src = "assets/SKlogo.svg",
-                   id = 'sk-logo-image')
 
 DISCLAIMER_BUTTON = dbc.Button("Disclaimer",
                                color = "secondary",
@@ -1383,9 +1378,7 @@ GSV_LOGO_DIV = html.Div(id = 'gsv-logo-image-div',
                         children = [GSV_LOGO])
 
 COMP_LOGO_DIV = html.Div(id = 'comp-logo-image-div',
-                         children = [TCAG_LOGO,
-                                     SK_LOGO,
-                                     DISCLAIMER_DIV])
+                         children = [DISCLAIMER_DIV])
 
 LOGO_DIV = html.Div(id = 'logo-image-div',
                     children = [GSV_LOGO_DIV,
