@@ -1363,7 +1363,7 @@ DISCLAIMER_COLLAPSE = dbc.Collapse(dbc.Card(dbc.CardBody(dcc.Markdown('''
                                                                     target="_blank"
                                                                     style="color:#2ba089; text-decoration:none;"
                                                                     children="(Chirmade et. al., 2025)" />
-                                                                    <span children=". Genomic location is referenced against GRCh38." />
+                                                                    <span children=". Genomic location is referenced against GRCh38. The tool is provided as-is and may be updated or withdrawn without notice. This tool is intended for research and educational purposes only. Outputs are not intended for clinical, diagnostic, or therapeutic use." />
                                                                                 ''',
                                                                     dangerously_allow_html = True,
                                                                     id = 'disclaimer-mrkdwn'))),
